@@ -156,6 +156,7 @@
       heartRawTs: [], heartRawV: [], // 心率原始序列（分布图）
       hrvRawTs: [], hrvRawV: [],    // HRV 原始序列（睡眠期聚合用）
       sleepSegs: [],                 // 睡眠原始段（单日时间轴）{d, stage, startMin, durMin}
+      workouts: [],                  // Workout 记录 {type,label,startTs,endTs,durMin,energy,distance}
       skipped: { rows: 0, badValue: 0, badDate: 0, negative: 0, badUnit: 0, unknownType: 0, unknownUnit: 0 },
       unitWarned: {},
       recordCount: 0,
@@ -292,6 +293,69 @@
     }
   }
 
+  /* Workout 类型 → 中文标签 */
+  var WORKOUT_LABELS = {
+    'HKWorkoutActivityTypeWalking': '步行',
+    'HKWorkoutActivityTypeHiking': '徒步',
+    'HKWorkoutActivityTypeRunning': '跑步',
+    'HKWorkoutActivityTypeCycling': '骑行',
+    'HKWorkoutActivityTypeSwimming': '游泳',
+    'HKWorkoutActivityTypeFunctionalStrengthTraining': '力量训练',
+    'HKWorkoutActivityTypeTraditionalStrengthTraining': '力量训练',
+    'HKWorkoutActivityTypeHighIntensityIntervalTraining': 'HIIT',
+    'HKWorkoutActivityTypeYoga': '瑜伽',
+    'HKWorkoutActivityTypeElliptical': '椭圆机',
+    'HKWorkoutActivityTypeStairClimbing': '爬楼机',
+    'HKWorkoutActivityTypeDance': '舞蹈',
+    'HKWorkoutActivityTypeRowing': '划船机',
+    'HKWorkoutActivityTypeCrossTraining': '交叉训练',
+    'HKWorkoutActivityTypeCoreTraining': '核心训练',
+    'HKWorkoutActivityTypeFlexibility': '拉伸',
+    'HKWorkoutActivityTypePlay': '运动',
+    'HKWorkoutActivityTypeOther': '其他'
+  };
+  function workoutLabel(type) { return WORKOUT_LABELS[type] || type.replace(/^HKWorkoutActivityType/, ''); }
+
+  /* Workout 块处理（非自闭合，含 WorkoutStatistics 子元素） */
+  function processWorkoutBlock(block, acc) {
+    var gt = block.indexOf('>');
+    if (gt === -1 || block.indexOf('<Workout') !== 0) { acc.skipped.rows++; return; }
+    var tag = block.slice(0, gt + 1);
+    var a = extractAttrs(tag);
+    var type = a.workoutActivityType;
+    var d = parseAppleDate(a.startDate || a.creationDate);
+    if (!type || !d) { acc.skipped.rows++; return; }
+    var durMin = Number(a.duration);
+    if (!isFinite(durMin) || durMin <= 0 || durMin > 24 * 60) { acc.skipped.badValue++; return; }
+    if (a.durationUnit === 'sec' || a.durationUnit === 's') durMin /= 60;
+    if (a.durationUnit === 'hour' || a.durationUnit === 'h') durMin *= 60;
+    /* WorkoutStatistics 子元素：距离/能量 */
+    var energy = null, distance = null;
+    var re = /<WorkoutStatistics\b([^>]*)\/?>/g, m;
+    while ((m = re.exec(block)) !== null) {
+      var sa = extractAttrs(m[1]);
+      var sum = Number(sa.sum);
+      if (!isFinite(sum)) continue;
+      var un = UNIT_NORM[sa.unit || ''];
+      var f = un ? un.f : 1;
+      var v = typeof f === 'function' ? f(sum) : sum * f;
+      if (sa.type === 'HKQuantityTypeIdentifierActiveEnergyBurned' && energy == null) energy = v;
+      else if (sa.type === 'HKQuantityTypeIdentifierDistanceWalkingRunning' && distance == null) distance = v;
+      else if (sa.type === 'HKQuantityTypeIdentifierDistanceCycling' && distance == null) distance = v;
+      else if (sa.type === 'HKQuantityTypeIdentifierDistance' && distance == null) distance = v;
+    }
+    acc.workouts.push({
+      type: type,
+      label: workoutLabel(type),
+      d: (function () { var ld = new Date(d.ts); return ld.getFullYear() + '-' + pad2(ld.getMonth() + 1) + '-' + pad2(ld.getDate()); })(),
+      startTs: d.ts,
+      endTs: d.ts + Math.round(durMin * 60000),
+      durMin: Math.round(durMin * 10) / 10,
+      energy: energy != null ? Math.round(energy) : null,
+      distance: distance != null ? Math.round(distance * 1000) / 1000 : null
+    });
+  }
+
   /* 行级解析 → 块级解析（兼容单行自闭合 / 长行折行 / 非自闭合 + MetadataEntry）
    * block: 从 '<Record' 到 '/>' 或 '</Record>' 的完整片段 */
   function processBlock(block, acc) {
@@ -315,14 +379,33 @@
   /* 流式块扫描器：兼容折行/跨 chunk */
   function createScanner(acc) {
     var buffer = '';
+    var wq = []; /* <Workout 位置队列（当前 buffer 偏移） */
     return {
       push: function (chunk) {
         buffer += chunk;
+        /* 重建 Workout 位置队列（每 chunk 一次全扫；Workout 块稀少，开销低） */
+        wq.length = 0;
+        var qi = 0;
+        while ((qi = buffer.indexOf('<Workout', qi)) !== -1) {
+          if (buffer.charAt(qi + 8) !== 'S') wq.push(qi); /* 排除 <WorkoutStatistics */
+          qi += 8;
+        }
         var processed = 0;
         for (;;) {
-          var s = buffer.indexOf('<Record', processed);
+          var s1 = buffer.indexOf('<Record', processed);
+          var s = s1;
+          var isWorkout = false;
+          while (wq.length && wq[0] < processed) wq.shift();
+          if (wq.length && (s1 === -1 || wq[0] < s1)) { s = wq[0]; isWorkout = true; }
           if (s === -1) { processed = Math.max(0, buffer.length - 16); break; }
-          /* 优先找 '/>'（自闭合或 MetadataEntry 结尾，均能正确截断）；
+          if (isWorkout) {
+            var we = buffer.indexOf('</Workout>', s);
+            if (we === -1) { processed = s; break; } /* 块未完成，等待更多数据 */
+            processWorkoutBlock(buffer.slice(s, we + 10), acc);
+            processed = we + 2;
+            continue;
+          }
+          /* Record 块：优先找 '/>'（自闭合或 MetadataEntry 结尾，均能正确截断）；
              找不到才找 '</Record>'（避免对长 buffer 做二次全量扫描） */
           var e1 = buffer.indexOf('/>', s);
           var e;
@@ -337,7 +420,11 @@
             processed = e1 + 2;
           }
         }
-        if (processed > 0) buffer = buffer.slice(processed);
+        if (processed > 0) {
+          buffer = buffer.slice(processed);
+          for (var wi = 0; wi < wq.length; wi++) wq[wi] -= processed;
+          while (wq.length && wq[0] < 0) wq.shift();
+        }
       },
       flush: function () { /* 尾部不完整块忽略 */ }
     };
@@ -487,6 +574,34 @@
       daily.hrvSleep = { label: '睡眠期 HRV', kind: 'avg', unit: 'ms', days: hrvSleepDays };
     }
 
+    /* Workout 按天聚合 + 原始列表 */
+    var workouts = acc.workouts.sort(function (x, y) { return x.startTs - y.startTs; });
+    var wkDay = new Map();
+    workouts.forEach(function (w) {
+      var local = new Date(w.startTs);
+      var dk = local.getFullYear() + '-' + pad2(local.getMonth() + 1) + '-' + pad2(local.getDate());
+      var slot = wkDay.get(dk);
+      if (!slot) { slot = { count: 0, durMin: 0, energy: 0, distance: 0, types: {} }; wkDay.set(dk, slot); }
+      slot.count++;
+      slot.durMin += w.durMin;
+      if (w.energy != null) slot.energy += w.energy;
+      if (w.distance != null) slot.distance += w.distance;
+      slot.types[w.label] = (slot.types[w.label] || 0) + w.durMin;
+    });
+    var wkDays = [];
+    wkDay.forEach(function (slot, dk) {
+      wkDays.push({
+        d: dk, ts: dkToTs(dk),
+        count: slot.count,
+        durMin: Math.round(slot.durMin * 10) / 10,
+        energy: Math.round(slot.energy),
+        distance: Math.round(slot.distance * 1000) / 1000,
+        types: slot.types
+      });
+    });
+    wkDays.sort(function (x, y) { return x.ts - y.ts; });
+    daily.workout = { label: '运动', kind: 'sum', unit: 'min', days: wkDays };
+
     var heartRaw = null;
     if (acc.heartRawTs.length) {
       heartRaw = {
@@ -503,6 +618,7 @@
       other: other,
       heartRaw: heartRaw,
       sleepSegs: sleepSegs,
+      workouts: workouts,
       types: types,
       stats: {
         recordCount: acc.recordCount,
@@ -591,6 +707,7 @@
     createAcc: createAcc,
     processLine: processLine,
     processBlock: processBlock,
+    processWorkoutBlock: processWorkoutBlock,
     createScanner: createScanner,
     scanText: scanText,
     processRecord: processRecord,

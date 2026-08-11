@@ -405,6 +405,7 @@ footer {
       <button class="mnav active" data-module="overview">概览<span class="badge" id="badge-overview">–</span></button>
       <button class="mnav" data-module="sleep">睡眠<span class="badge" id="badge-sleep">–</span></button>
       <button class="mnav" data-module="heart">心率<span class="badge" id="badge-heart">–</span></button>
+      <button class="mnav" data-module="motion">运动<span class="badge" id="badge-motion">–</span></button>
       <button class="mnav" data-module="others">其他指标<span class="badge" id="badge-others">–</span></button>
     </nav>
 
@@ -581,6 +582,51 @@ footer {
       <div class="panel" id="hr-extra-panel" hidden>
         <div class="panel-head"><span class="panel-title cyan">深度附加</span><span class="panel-title" style="color:var(--faint)">HRV / 静息对比</span></div>
         <div class="panel-body" id="hr-extra-body"></div>
+      </div>
+    </section>
+
+    <!-- ============ 运动模块 ============ -->
+    <section id="module-motion" hidden>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title" style="color:#F2B45C">运动分析</span>
+          <div class="gran-bar">
+            <div class="tabs" id="motion-gran-tabs">
+              <button class="tab active" data-gran="day">日</button>
+              <button class="tab" data-gran="week">周</button>
+              <button class="tab" data-gran="month">月</button>
+              <button class="tab" data-gran="quarter">季</button>
+              <button class="tab" data-gran="half">半年</button>
+              <button class="tab" data-gran="year">年</button>
+            </div>
+            <div class="gran-cursor">
+              <button class="nav-btn" id="motion-prev" aria-label="上一个">◀</button>
+              <span class="cur-label" id="motion-label">—</span>
+              <button class="nav-btn" id="motion-next" aria-label="下一个">▶</button>
+            </div>
+          </div>
+        </div>
+        <div class="cards" id="motion-cards"></div>
+        <div class="chart-wrap" id="motion-wrap">
+          <canvas id="motion-chart" role="img" aria-label="运动趋势图" style="height:320px"></canvas>
+          <div class="chart-tip" id="motion-tip" hidden></div>
+        </div>
+        <div class="chart-meta" id="motion-meta"></div>
+      </div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title" style="color:#F2B45C">类型构成</span><span class="panel-title" style="color:var(--faint)">窗口内运动类型</span></div>
+          <div class="panel-body" id="motion-types"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title">周规律热力</span><span class="panel-title" style="color:var(--faint)">WEEKLY · 运动时长</span></div>
+          <div class="panel-body"><div class="heat-wrap" id="motion-heat"></div></div>
+          <div class="heat-meta"><span id="motion-heat-label"></span><span>颜色越亮 = 运动越久</span></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">运动明细</span><span class="panel-title" style="color:var(--faint)">窗口内每次运动</span></div>
+        <div class="panel-body no-pad"><table class="rich-table" id="motion-table"></table></div>
       </div>
     </section>
 

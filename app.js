@@ -23,6 +23,8 @@
     hrGran: 'day',
     hrCur: null,
     metricMod: { sel: null, gran: 'day', cur: null },
+    motionGran: 'day',
+    motionCur: null,
     othersSel: null,
     othersRange: '90d'
   };
@@ -858,13 +860,14 @@
     document.querySelectorAll('.mnav').forEach(function (b) {
       b.classList.toggle('active', b.getAttribute('data-module') === m);
     });
-    ['overview', 'sleep', 'heart', 'others'].forEach(function (mod) {
+    ['overview', 'sleep', 'heart', 'motion', 'others'].forEach(function (mod) {
       $('module-' + mod).hidden = mod !== m;
     });
     try {
       if (m === 'overview') renderOverview();
       else if (m === 'sleep') renderSleep();
       else if (m === 'heart') renderHeart();
+      else if (m === 'motion') renderMotion();
       else if (m === 'others') renderOthers();
     } catch (e) {
       try { document.title = 'MODULE-ERR:' + m + ':' + (e.message || e) + ' @' + ((e.stack || '').split('\n')[1] || ''); } catch (_) {}
@@ -882,6 +885,7 @@
     $('badge-overview').textContent = fmtNum(res.stats.recordCount);
     $('badge-sleep').textContent = sd ? sd.days.length + ' 天' : '0';
     $('badge-heart').textContent = hd ? hd.days.length + ' 天' : '0';
+    $('badge-motion').textContent = (res.workouts ? res.workouts.length : 0) + ' 次';
     $('badge-others').textContent = res.other.length ? res.other.length + ' 项' : '0';
   }
 
@@ -2228,6 +2232,222 @@
   }
   $('hr-prev').addEventListener('click', function () { var p = hrPrevWin(); if (p) { state.hrCur = p; renderHeart(); } });
   $('hr-next').addEventListener('click', function () { var n = hrNextWin(); if (n) { state.hrCur = n; renderHeart(); } });
+
+  /* ================= 运动模块 ================= */
+  var MOTION_COLORS = { 步行: '#4FC3B7', 徒步: '#7B6CF6', 跑步: '#E8A33D', 骑行: '#F2B45C', 游泳: '#53B5E8', 力量训练: '#E5655A', HIIT: '#FF8A65', 瑜伽: '#9B8AFB', 椭圆机: '#63C77F', 爬楼机: '#5B8DEF', 舞蹈: '#E58AC0', 划船机: '#6FCF97', 交叉训练: '#56CCF2', 核心训练: '#BB8FCE', 拉伸: '#7ED6A5', 运动: '#F6C667', 其他: '#8B8577' };
+  function motionColor(label) { return MOTION_COLORS[label] || '#8B8577'; }
+  function motionAllDays() { return state.res.daily.workout ? state.res.daily.workout.days : []; }
+  function motionWindow(cur) {
+    var g = state.motionGran;
+    if (g === 'day') return { start: cur, end: cur, label: cur };
+    if (g === 'week') { var ws = weekStartKey(cur), we = weekEndKey(cur); return { start: ws, end: we, label: ws.slice(5) + ' ~ ' + we.slice(5) + ' 周' }; }
+    if (g === 'quarter') {
+      var m = +cur.slice(5, 7);
+      var s = quarterStartKey(cur);
+      var e = monthEndKey(monthKeyAdd(s.slice(0, 7) + '-01', 2));
+      return { start: s, end: e, label: cur.slice(0, 4) + '-Q' + (Math.floor((m - 1) / 3) + 1) + ' 季' };
+    }
+    if (g === 'half') {
+      var m2 = +cur.slice(5, 7);
+      var s2 = halfStartKey(cur);
+      var e2 = monthEndKey(monthKeyAdd(s2.slice(0, 7) + '-01', 5));
+      return { start: s2, end: e2, label: cur.slice(0, 4) + (m2 <= 6 ? ' 上半年' : ' 下半年') };
+    }
+    if (g === 'year') return { start: cur.slice(0, 4) + '-01-01', end: cur.slice(0, 4) + '-12-31', label: cur.slice(0, 4) + ' 年' };
+    return { start: cur.slice(0, 7) + '-01', end: monthEndKey(cur), label: cur.slice(0, 7) + ' 月' };
+  }
+  function motionPrevCur() {
+    var g = state.motionGran, cur = state.motionCur;
+    var days = motionAllDays();
+    if (g === 'day') { var idx = days.findIndex(function (d) { return d.d === cur; }); return idx > 0 ? days[idx - 1].d : null; }
+    if (g === 'week') return dayKeyAdd(weekStartKey(cur), -7);
+    if (g === 'quarter') return monthKeyAdd(cur.slice(0, 7) + '-01', -3);
+    if (g === 'half') return monthKeyAdd(cur.slice(0, 7) + '-01', -6);
+    if (g === 'year') return (cur.slice(0, 4) - 1) + '-01-01';
+    return monthKeyAdd(cur.slice(0, 7) + '-01', -1);
+  }
+  function motionNextCur() {
+    var g = state.motionGran, cur = state.motionCur;
+    var days = motionAllDays();
+    if (g === 'day') { var idx = days.findIndex(function (d) { return d.d === cur; }); return idx >= 0 && idx < days.length - 1 ? days[idx + 1].d : null; }
+    if (g === 'week') return dayKeyAdd(weekStartKey(cur), 7);
+    if (g === 'quarter') return monthKeyAdd(cur.slice(0, 7) + '-01', 3);
+    if (g === 'half') return monthKeyAdd(cur.slice(0, 7) + '-01', 6);
+    if (g === 'year') return (cur.slice(0, 4) - -1) + '-01-01';
+    return monthKeyAdd(cur.slice(0, 7) + '-01', 1);
+  }
+  function motionDefaultCur() {
+    var days = motionAllDays();
+    return days.length ? days[days.length - 1].d : null;
+  }
+  function setMotionGran(g) {
+    state.motionGran = g;
+    document.querySelectorAll('#motion-gran-tabs .tab').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-gran') === g); });
+    if (state.motionCur) {
+      if (g === 'week') state.motionCur = weekStartKey(state.motionCur);
+      else if (g === 'month') state.motionCur = state.motionCur.slice(0, 7) + '-01';
+      else if (g === 'quarter') state.motionCur = quarterStartKey(state.motionCur);
+      else if (g === 'half') state.motionCur = halfStartKey(state.motionCur);
+      else if (g === 'year') state.motionCur = state.motionCur.slice(0, 4) + '-01-01';
+    }
+    renderMotion();
+  }
+  $('motion-gran-tabs').addEventListener('click', function (e) {
+    var t = e.target.closest('.tab');
+    if (t) setMotionGran(t.getAttribute('data-gran'));
+  });
+  $('motion-prev').addEventListener('click', function () { var p = motionPrevCur(); if (p) { state.motionCur = p; renderMotion(); } });
+  $('motion-next').addEventListener('click', function () { var n = motionNextCur(); if (n) { state.motionCur = n; renderMotion(); } });
+
+  /* 运动堆叠柱：按类型着色 */
+  function drawMotionStack(canvas, list, opts) {
+    opts = opts || {};
+    var c = setupCanvas(canvas);
+    var ctx = c.ctx, W = c.W, H = c.H;
+    var padL = 56, padR = 16, padT = 16, padB = 28;
+    var maxV = 10;
+    list.forEach(function (d) { if (d.durMin > maxV) maxV = d.durMin; });
+    maxV = Math.ceil(maxV / 30) * 30;
+    if (maxV <= 30) maxV = 60;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var yOf = function (v) { return padT + (1 - v / maxV) * plotH; };
+    var n = list.length;
+    var xOf = function (i) { return padL + (n <= 1 ? 0.5 : i / (n - 1)) * plotW; };
+    ctx.clearRect(0, 0, W, H);
+    drawGrid(ctx, W, H, padL, padR, padT, padB, 0, maxV, maxV / 4, function (v) { return fmtDur(v); });
+    var bw = Math.max(2, Math.min(24, plotW / n * 0.5));
+    list.forEach(function (d, i) {
+      var x = xOf(i) - bw / 2;
+      var y = yOf(0);
+      var typeNames = Object.keys(d.types || {});
+      if (!typeNames.length) {
+        ctx.fillStyle = 'rgba(255,255,255,0.10)';
+        ctx.fillRect(x, yOf(0) - yOf(d.durMin), bw, yOf(0) - yOf(d.durMin));
+        return;
+      }
+      typeNames.forEach(function (tn) {
+        var v = d.types[tn];
+        var h = yOf(0) - yOf(v);
+        ctx.fillStyle = motionColor(tn);
+        ctx.fillRect(x, y - h, bw, h);
+        y -= h;
+      });
+    });
+    drawXAxis(ctx, W, H, padL, padR, padT, padB, xTicks(n, 8), list, opts.xLabel);
+    attachTip(canvas, opts.tipEl, xOf, function () { return padT + plotH / 2; }, list, function (d) {
+      var html = '<div class="t-date">' + d.d + '</div>' +
+        '<div class="t-row"><span>次数</span><b>' + d.count + ' 次</b></div>' +
+        '<div class="t-row"><span>总时长</span><b>' + fmtDur(d.durMin) + '</b></div>' +
+        '<div class="t-row"><span>能量</span><b>' + (d.energy || 0) + ' kcal</b></div>';
+      if (d.distance) html += '<div class="t-row"><span>距离</span><b>' + d.distance + ' km</b></div>';
+      var types = Object.keys(d.types || {});
+      if (types.length) {
+        html += '<div style="border-top:1px solid rgba(255,255,255,0.08);margin-top:5px;padding-top:4px">';
+        types.forEach(function (tn) {
+          html += '<div class="t-row"><span><i style="display:inline-block;width:8px;height:8px;background:' + motionColor(tn) + ';border-radius:2px;margin-right:4px"></i>' + tn + '</span><b>' + fmtDur(d.types[tn]) + '</b></div>';
+        });
+        html += '</div>';
+      }
+      return html;
+    });
+  }
+
+  function renderMotion() {
+    var days = motionAllDays();
+    var workouts = state.res.workouts || [];
+    if (!days.length && !workouts.length) {
+      $('motion-cards').innerHTML = '<div class="qual-note">导出数据中没有运动记录（Workout）。</div>';
+      emptyState($('motion-chart'), '无运动数据');
+      $('motion-meta').innerHTML = '';
+      $('motion-types').innerHTML = '<div class="qual-note">—</div>';
+      $('motion-table').innerHTML = '';
+      $('motion-heat').innerHTML = '<div class="chart-empty" style="position:static;padding:30px 0"><div>NO DATA</div></div>';
+      $('motion-heat-label').textContent = '—';
+      return;
+    }
+    if (!state.motionCur || !days.some(function (d) { return d.d === state.motionCur; })) state.motionCur = motionDefaultCur();
+    var win = motionWindow(state.motionCur);
+    var inWin = windowDays(days, win.start, win.end);
+    var wkW = workouts.filter(function (w) { return w.d >= win.start && w.d <= win.end; });
+    var prevCur = motionPrevCur();
+    var prevWin = prevCur ? motionWindow(prevCur) : null;
+    var prevW = prevWin ? workouts.filter(function (w) { return w.d >= prevWin.start && w.d <= prevWin.end; }) : [];
+    var isDay = state.motionGran === 'day';
+
+    $('motion-label').textContent = win.label;
+    $('motion-prev').disabled = !prevCur;
+    $('motion-next').disabled = !motionNextCur();
+
+    /* 指标卡 */
+    var cards = [];
+    function card(label, value, sub, color) {
+      cards.push('<div class="card ' + (value ? '' : ' no-data') + '" style="cursor:default"><div class="card-head"><span class="card-label"><span class="dot" style="background:' + color + '"></span>' + label + '</span><span class="card-date">' + (isDay ? '单日' : '窗口') + '</span></div>' +
+        '<div class="card-value">' + (value || 'NO DATA') + '</div><div class="card-sub">' + (sub || '&nbsp;') + '</div></div>');
+    }
+    var totalDur = 0, totalEnergy = 0, totalDist = 0;
+    wkW.forEach(function (w) { totalDur += w.durMin; if (w.energy != null) totalEnergy += w.energy; if (w.distance != null) totalDist += w.distance; });
+    var totalPrevDur = 0;
+    prevW.forEach(function (w) { totalPrevDur += w.durMin; });
+    var winDaysN = Math.max(1, (function () { var d1 = HE.dkToTs(win.start), d2 = HE.dkToTs(win.end); return Math.round((d2 - d1) / 86400000) + 1; })());
+    function vs(delta, suffix) {
+      if (prevW.length === 0 && totalPrevDur === 0) return '';
+      var cls = delta >= 0 ? 'up' : 'down';
+      return '<span class="' + cls + '">' + (delta >= 0 ? '▲ +' : '▼ ') + Math.abs(Math.round(delta)) + ' ' + suffix + '</span> vs 上期';
+    }
+    card('运动次数', wkW.length + '<small>次</small>', vs(wkW.length - prevW.length, '次'), '#F2B45C');
+    card('日均时长', wkW.length ? fmtDur(totalDur / winDaysN) : '', vs(totalDur / winDaysN - totalPrevDur / winDaysN, 'min'), '#F2B45C');
+    card('日均能量', wkW.length ? Math.round(totalEnergy / winDaysN) + '<small>kcal</small>' : '', '', '#F2B45C');
+    card('平均单次', wkW.length ? fmtDur(totalDur / wkW.length) : '', '每次 ' + (wkW.length ? (totalEnergy / wkW.length).toFixed(0) : 0) + ' kcal', '#F2B45C');
+    card('运动天数', inWin.length + '<small>天</small>', '占窗口 ' + Math.round(inWin.length / winDaysN * 100) + '%', '#F2B45C');
+    $('motion-cards').innerHTML = cards.join('');
+
+    /* 主图 */
+    var wrap = $('motion-wrap');
+    clearEmpty(wrap);
+    var showDays = isDay ? days.slice(-30) : inWin;
+    if (!showDays.length) emptyState($('motion-chart'), '该窗口没有运动记录');
+    else drawMotionStack($('motion-chart'), showDays, { tipEl: $('motion-tip') });
+    $('motion-meta').innerHTML =
+      '<span><b>粒度：</b>' + (isDay ? '近 30 天' : state.motionGran === 'week' ? '本周 7 天' : state.motionGran === 'month' ? '本月每日' : '窗口每日') + '</span>' +
+      '<span><b>柱色：</b>按运动类型着色（悬停查看明细）</span>' +
+      '<span><b>数据源：</b>Apple Workout 记录（' + workouts.length + ' 次）</span>';
+
+    /* 类型构成 */
+    var typeDur = {};
+    wkW.forEach(function (w) { typeDur[w.label] = (typeDur[w.label] || 0) + w.durMin; });
+    var typeNames = Object.keys(typeDur).sort(function (a, b) { return typeDur[b] - typeDur[a]; });
+    var totalT = typeNames.reduce(function (a, t) { return a + typeDur[t]; }, 0);
+    var html = '';
+    if (totalT) {
+      html = '<div class="stack-bar">' + typeNames.map(function (t) {
+        return '<span style="width:' + (typeDur[t] / totalT * 100).toFixed(1) + '%;background:' + motionColor(t) + '"></span>';
+      }).join('') + '</div>';
+      html += '<div class="stack-legend">' + typeNames.map(function (t) {
+        var cnt = wkW.filter(function (w) { return w.label === t; }).length;
+        return '<span><i style="background:' + motionColor(t) + '"></i>' + t + ' ' + fmtDur(typeDur[t]) + '（' + Math.round(typeDur[t] / totalT * 100) + '% · ' + cnt + ' 次）</span>';
+      }).join('') + '</div>';
+    } else {
+      html = '<div class="qual-note">该窗口无运动记录。</div>';
+    }
+    $('motion-types').innerHTML = html;
+
+    /* 明细表 */
+    var rows = wkW.slice().sort(function (a, b) { return b.startTs - a.startTs; }).map(function (w) {
+      var d = new Date(w.startTs);
+      var tm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+      return '<tr><td>' + w.d + ' ' + tm + '</td><td><span style="color:' + motionColor(w.label) + '">●</span> ' + esc(w.label) + '</td>' +
+        '<td class="num">' + fmtDur(w.durMin) + '</td>' +
+        '<td class="num">' + (w.energy != null ? w.energy + ' kcal' : '—') + '</td>' +
+        '<td class="num">' + (w.distance != null ? w.distance + ' km' : '—') + '</td></tr>';
+    }).join('');
+    $('motion-table').innerHTML =
+      '<thead><tr><th>时间</th><th>类型</th><th>时长</th><th>能量</th><th>距离</th></tr></thead><tbody>' + (rows || '<tr><td colspan="5" class="mut">该窗口无运动记录</td></tr>') + '</tbody>';
+
+    /* 周热力 */
+    var heatDays = days.map(function (d) { return { d: d.d, ts: d.ts, v: d.durMin }; });
+    $('motion-heat-label').textContent = heatDays.length + ' 天 · ' + (heatDays.length ? shortDay(heatDays[0].ts, true) + ' → ' + shortDay(heatDays[heatDays.length - 1].ts, true) : '—');
+    renderHeatGrid($('motion-heat'), heatDays, 'rgba(242,180,92,1)', 0, '运动时长', $('motion-tip'), function (v) { return fmtDur(v); });
+  }
 
   /* ================= 通用指标分析模块（其他指标） ================= */
   var METRIC_LIB = [];
