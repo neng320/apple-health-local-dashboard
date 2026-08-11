@@ -79,8 +79,10 @@
     return y + '-' + String(m).padStart(2, '0');
   }
   function monthEndKey(key) {
-    var next = monthKeyAdd(key.slice(0, 7) + '-01', 1);
-    return dayKeyAdd(next, -1);
+    var y = +key.slice(0, 4), m = +key.slice(5, 7);
+    var ny = m === 12 ? y + 1 : y;
+    var nm = m === 12 ? 1 : m + 1;
+    return dayKeyAdd(ny + '-' + (nm < 10 ? '0' : '') + nm + '-01', -1);
   }
   function weekStartKey(key) {
     var ts = HE.dkToTs(key);
@@ -1146,7 +1148,9 @@
   var SLEEP_MODE_KEY = { all: 'sleep', night: 'sleepNight', nap: 'sleepNap' };
   function sleepAllDays() {
     var k = SLEEP_MODE_KEY[state.sleepMode] || 'sleep';
-    return state.res.daily[k] ? state.res.daily[k].days : [];
+    var days = state.res.daily[k] ? state.res.daily[k].days : [];
+    /* 剔除无有效睡眠记录的天（v=0：未佩戴设备/仅午睡无晚间），不参与任何计算 */
+    return days.filter(function (d) { return d.v > 0; });
   }
   function sleepDataDays() { return sleepAllDays().filter(function (d) { return d.v > 0 || d.inBed > 0; }); }
   function setSleepMode(m) {
@@ -1173,6 +1177,16 @@
     state.sleepGran = g;
     document.querySelectorAll('#sleep-gran-tabs .tab').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-gran') === g); });
     if (state.sleepCur) {
+      if (g === 'week') state.sleepCur = weekStartKey(state.sleepCur);
+      else if (g === 'month') state.sleepCur = state.sleepCur.slice(0, 7) + '-01';
+      else if (g === 'quarter') state.sleepCur = quarterStartKey(state.sleepCur);
+      else if (g === 'half') state.sleepCur = halfStartKey(state.sleepCur);
+      else if (g === 'year') state.sleepCur = state.sleepCur.slice(0, 4) + '-01-01';
+    }
+    /* 若新粒度窗口内无数据（如从年切回月时停留在年初），自动跳到最近有数据的窗口 */
+    var win = sleepWindow(state.sleepCur);
+    if (!windowDays(sleepAllDays(), win.start, win.end).length) {
+      state.sleepCur = lastSleepDay();
       if (g === 'week') state.sleepCur = weekStartKey(state.sleepCur);
       else if (g === 'month') state.sleepCur = state.sleepCur.slice(0, 7) + '-01';
       else if (g === 'quarter') state.sleepCur = quarterStartKey(state.sleepCur);
@@ -1366,8 +1380,11 @@
       var effR = effCalc(agg.asleep, agg.inBed);
       var eff = effR.v;
       card('睡眠效率', eff != null ? Math.round(eff) + '<small>%</small>' : (effR.abnormal ? '数据异常' : ''), effR.abnormal ? '<span style="color:#E5655A">在床记录缺失/矛盾（asleep>inBed）</span>' : (eff != null ? (eff > 90 ? '良好' : eff > 80 ? '正常' : '偏低') : '在床时长缺失'), '#E8A33D', 'amber');
+      /* 独立监控卡：窗口平均入睡/醒来时间（日=具体时间） */
+      card('入睡时间', fmtTime(fallMin), isDay ? '' : '窗口平均（周/月/季/半年/年）', '#4FC3B7', 'cyan');
+      card('醒来时间', fmtTime(wakeMin), isDay ? '' : '窗口平均（周/月/季/半年/年）', '#4FC3B7', 'cyan');
     } else {
-      ['总睡眠', '深睡', 'REM', '睡眠效率'].forEach(function (l) { card(l, '', '', '#9B8AFB'); });
+      ['总睡眠', '深睡', 'REM', '睡眠效率', '入睡时间', '醒来时间'].forEach(function (l) { card(l, '', '', '#9B8AFB'); });
     }
     $('sleep-cards').innerHTML = cards.join('');
     /* 总睡眠卡右上角：入睡/醒来时间 */
