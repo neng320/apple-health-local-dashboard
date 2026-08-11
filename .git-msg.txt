@@ -1,1 +1,0 @@
-v2.2: motion module (Workout parsing, type-stacked chart, details table, 6 granularities)

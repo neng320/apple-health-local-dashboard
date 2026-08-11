@@ -78,9 +78,9 @@ health-dashboard/
 仓库已本地初始化并完成首次提交，接手方只需：
 
 ```bash
-# 1. 在 GitHub 创建空仓库（如 vitals-ark），不要勾选 README 初始化
+# 1. 在 GitHub 创建空仓库（如 apple-health-local-dashboard），不要勾选 README 初始化
 # 2. 在项目根目录执行：
-git remote add origin https://github.com/<你的用户名>/vitals-ark.git
+git remote add origin https://github.com/<你的用户名>/apple-health-local-dashboard.git
 git branch -M main
 git push -u origin main
 
