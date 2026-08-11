@@ -94,6 +94,16 @@
     var arrow = delta >= 0 ? '▲ +' : '▼ ';
     return '<span class="' + cls + '">' + arrow + Math.abs(Math.round(delta)) + ' ' + suffix + '</span>';
   }
+  /* 睡眠效率（严格按 Apple 口径）：asleep ⊆ inBed，正常范围 0–100%
+   * - inBed 缺失 → 无效（—）
+   * - asleep > inBed×1.05 → InBed 记录缺失/矛盾 → 数据异常（不参与评分）
+   * - 微小超差（≤5%，Apple 段边界分钟对齐差异）→ clamp 100 */
+  function effCalc(asleep, inBed) {
+    if (!inBed || !asleep) return { v: null, abnormal: false };
+    var eff = asleep / inBed * 100;
+    if (eff > 105) return { v: null, abnormal: true };
+    return { v: Math.min(100, eff), abnormal: false };
+  }
   /* 睡眠时长状态分级（分钟）：<5h 严重不足 / 5–5.5h 不足 / 5.5–8h 正常 / >8h 偏高 */
   function sleepStatus(v) {
     if (v == null || v <= 0) return null;
@@ -1655,9 +1665,14 @@
     html += '<div class="stack-legend">' + segs.map(function (s) {
       return '<span><i style="background:' + s[2] + '"></i>' + s[0] + ' ' + fmtDur(s[1]) + '（' + (total ? Math.round(s[1] / total * 100) : 0) + '%）</span>';
     }).join('') + '</div>';
-    if (day && day.inBed) html += '<div class="qual-note" style="margin-top:8px">在床 ' + fmtDur(day.inBed) + ' · 睡眠效率 ' + (day.inBed ? Math.round(day.v / day.inBed * 100) : 0) + '%' +
-      (day.fallAsleepTs ? ' · 入睡 ' + fmtTime(localMinOf(day.fallAsleepTs)) : '') +
-      (day.wakeTs ? ' · 醒来 ' + fmtTime(localMinOf(day.wakeTs)) : '') + '</div>';
+    if (day && day.inBed) {
+      var eR3 = effCalc(day.v, day.inBed);
+      html += '<div class="qual-note" style="margin-top:8px">在床 ' + fmtDur(day.inBed) + ' · 睡眠效率 ' + (eR3.abnormal ? '<span style="color:#E5655A">数据异常（在床记录缺失/矛盾）</span>' : (eR3.v != null ? Math.round(eR3.v) + '%' : '—')) +
+        (day.fallAsleepTs ? ' · 入睡 ' + fmtTime(localMinOf(day.fallAsleepTs)) : '') +
+        (day.wakeTs ? ' · 醒来 ' + fmtTime(localMinOf(day.wakeTs)) : '') + '</div>';
+    } else if (day) {
+      html += '<div class="qual-note" style="margin-top:8px">在床时长缺失，无法计算效率</div>';
+    }
     el.innerHTML = html;
   }
   function renderSleepWeeklyTrend() {
