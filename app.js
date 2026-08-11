@@ -1155,11 +1155,26 @@
     var t = e.target.closest('.tab');
     if (t) setSleepMode(t.getAttribute('data-mode'));
   });
+  function quarterStartKey(key) {
+    var m = +key.slice(5, 7);
+    var qm = Math.floor((m - 1) / 3) * 3 + 1;
+    return key.slice(0, 4) + '-' + (qm < 10 ? '0' : '') + qm + '-01';
+  }
+  function halfStartKey(key) {
+    var m = +key.slice(5, 7);
+    var h = m <= 6 ? 1 : 7;
+    return key.slice(0, 4) + '-' + (h < 10 ? '0' : '') + h + '-01';
+  }
   function setSleepGran(g) {
     state.sleepGran = g;
     document.querySelectorAll('#sleep-gran-tabs .tab').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-gran') === g); });
-    if (g === 'week' && state.sleepCur) state.sleepCur = weekStartKey(state.sleepCur);
-    if (g === 'month' && state.sleepCur) state.sleepCur = state.sleepCur.slice(0, 7) + '-01';
+    if (state.sleepCur) {
+      if (g === 'week') state.sleepCur = weekStartKey(state.sleepCur);
+      else if (g === 'month') state.sleepCur = state.sleepCur.slice(0, 7) + '-01';
+      else if (g === 'quarter') state.sleepCur = quarterStartKey(state.sleepCur);
+      else if (g === 'half') state.sleepCur = halfStartKey(state.sleepCur);
+      else if (g === 'year') state.sleepCur = state.sleepCur.slice(0, 4) + '-01-01';
+    }
     renderSleep();
   }
   $('sleep-gran-tabs').addEventListener('click', function (e) {
@@ -1173,6 +1188,22 @@
       var ws = weekStartKey(cur), we = weekEndKey(cur);
       return { start: ws, end: we, label: ws.slice(5) + ' ~ ' + we.slice(5) + ' 周' };
     }
+    if (g === 'quarter') {
+      var m = +cur.slice(5, 7);
+      var qIdx = Math.floor((m - 1) / 3) + 1;
+      var s = quarterStartKey(cur);
+      var e = monthEndKey(monthKeyAdd(s.slice(0, 7) + '-01', 2));
+      return { start: s, end: e, label: cur.slice(0, 4) + '-Q' + qIdx + ' 季' };
+    }
+    if (g === 'half') {
+      var m2 = +cur.slice(5, 7);
+      var s2 = halfStartKey(cur);
+      var e2 = monthEndKey(monthKeyAdd(s2.slice(0, 7) + '-01', 5));
+      return { start: s2, end: e2, label: cur.slice(0, 4) + (m2 <= 6 ? ' 上半年' : ' 下半年') };
+    }
+    if (g === 'year') {
+      return { start: cur.slice(0, 4) + '-01-01', end: cur.slice(0, 4) + '-12-31', label: cur.slice(0, 4) + ' 年' };
+    }
     var mStart = cur.slice(0, 7) + '-01', mEnd = monthEndKey(cur);
     return { start: mStart, end: mEnd, label: cur.slice(0, 7) + ' 月' };
   }
@@ -1184,6 +1215,9 @@
       return idx > 0 ? days[idx - 1].d : null;
     }
     if (g === 'week') return dayKeyAdd(weekStartKey(cur), -7);
+    if (g === 'quarter') return monthKeyAdd(cur.slice(0, 7) + '-01', -3);
+    if (g === 'half') return monthKeyAdd(cur.slice(0, 7) + '-01', -6);
+    if (g === 'year') return (cur.slice(0, 4) - 1) + '-01-01';
     return monthKeyAdd(cur.slice(0, 7) + '-01', -1);
   }
   function nextSleepWindow() {
@@ -1194,6 +1228,9 @@
       return idx >= 0 && idx < days.length - 1 ? days[idx + 1].d : null;
     }
     if (g === 'week') return dayKeyAdd(weekStartKey(cur), 7);
+    if (g === 'quarter') return monthKeyAdd(cur.slice(0, 7) + '-01', 3);
+    if (g === 'half') return monthKeyAdd(cur.slice(0, 7) + '-01', 6);
+    if (g === 'year') return (cur.slice(0, 4) - -1) + '-01-01';
     return monthKeyAdd(cur.slice(0, 7) + '-01', 1);
   }
   function aggSleepDays(days) {
@@ -1282,18 +1319,30 @@
       nWin.forEach(function (d) { nV += d.v || 0; });
       pWin.forEach(function (d) { pV += d.v || 0; });
       if (isDay) { nV = nWin.length ? (nWin[0].v || 0) : 0; pV = pWin.length ? (pWin[0].v || 0) : 0; }
+      else {
+        var nDays = nWin.filter(function (d) { return d.v > 0; }).length || 1;
+        var pDays = pWin.filter(function (d) { return d.v > 0; }).length || 1;
+        nV /= nDays; pV /= pDays;
+      }
       splitHtml = '<br><span style="color:#4FC3B7">晚间 ' + fmtDur(nV) + '</span> · <span style="color:#E8A33D">午睡 ' + fmtDur(pV) + '</span>';
     }
     if (hasData) {
       var curAsleep = isDay ? (inWin[0] ? inWin[0].v : 0) : (agg.n ? agg.asleep / agg.n : 0);
+      var curInBed = isDay ? (inWin[0] ? inWin[0].inBed || 0 : 0) : (agg.n ? agg.inBed / agg.n : 0);
       var prevAsleep = prevAgg ? (isDay ? (prevAgg.n ? prevAgg.asleep : null) : (prevAgg.n ? prevAgg.asleep / prevAgg.n : 0)) : null;
       var statusHtml2 = (function () {
         var st = statusOf(curAsleep);
         if (!st) return '';
         var warn = st.label.indexOf('不足') >= 0 || st.label.indexOf('高于') >= 0;
-        return '<span style="color:' + st.color + '">' + (warn ? '⚠ ' : '') + st.label + (st.label.indexOf('严重') >= 0 ? ' · 需重点关注' : '') + '</span>';
+        var html = '<span style="color:' + st.color + '">' + (warn ? '⚠ ' : '') + st.label + (st.label.indexOf('严重') >= 0 ? ' · 需重点关注' : '') + '</span>';
+        /* 卧床时长判断：睡眠不足时区分「卧床充足但效率低」与「卧床时间短」 */
+        if (st.label.indexOf('不足') >= 0 && curInBed) {
+          if (curInBed >= 360) html += ' <span style="color:#E8A33D">· 卧床充足（' + fmtDur(curInBed) + '）但睡眠不足，效率偏低</span>';
+          else html += ' <span style="color:#E5655A">· 卧床时间短（' + fmtDur(curInBed) + '）</span>';
+        }
+        return html;
       })();
-      card('总睡眠', fmtDur(curAsleep), statusHtml2 + ' ' + vsPrev(curAsleep, prevAsleep, 'min', false) + (agg.n ? ' · ' + agg.n + ' 晚' : '') + splitHtml, '#9B8AFB', 'violet');
+      card('总睡眠', fmtDur(curAsleep) + (curInBed ? '<small>卧床 ' + fmtDur(curInBed) + '</small>' : ''), statusHtml2 + ' ' + vsPrev(curAsleep, prevAsleep, 'min', false) + (agg.n ? ' · ' + agg.n + ' 晚' : '') + splitHtml, '#9B8AFB', 'violet');
       var curDeep = isDay ? (inWin[0] ? inWin[0].deep : 0) : (agg.n ? agg.deep / agg.n : 0);
       var deepPct = curAsleep ? Math.round(curDeep / curAsleep * 100) : 0;
       card('深睡', fmtDur(curDeep), '占比 ' + deepPct + '%' + (deepPct < 15 ? '（偏低）' : deepPct > 25 ? '（偏高）' : '（正常）'), '#7B6CF6');
