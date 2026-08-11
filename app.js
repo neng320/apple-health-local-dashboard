@@ -1242,7 +1242,7 @@
     step('score', function () { renderSleepScore(agg, isDay ? (inWin[0] ? inWin[0] : null) : null); });
     step('history', function () { renderSleepHistory(); });
     step('main', function () { renderSleepMain(all, inWin, win, prevCur, isDay); });
-    step('stages', function () { renderSleepStages(agg, isDay ? (inWin[0] ? inWin[0] : null) : null); });
+    step('stages', function () { renderSleepStages(agg, isDay ? (inWin[0] ? inWin[0] : null) : null, prevAgg, isDay); });
     step('timing', function () {
       var t30 = all.slice(-30);
       drawDualLine($('sleep-timing-chart'), t30, {
@@ -1647,31 +1647,57 @@
     });
     ctx.restore();
   }
-  function renderSleepStages(agg, day) {
+  function renderSleepStages(agg, day, prevAgg, isDay) {
     var el = $('sleep-stages');
     var src = day || agg;
     var asleepVal = day ? (day.v || 0) : (agg.asleep || 0);
     var total = asleepVal + (src.awake || 0);
     if (!total) { el.innerHTML = '<div class="qual-note">该窗口内没有睡眠阶段数据。</div>'; return; }
+    var prev = prevAgg || null;
+    var prevN = prev && prev.n ? prev.n : 0;
+    var divN = isDay ? 1 : (agg.n || 1);
+    function stageCard(name, min, color, extraNote) {
+      var shown = min / divN;
+      var pct = total ? Math.round(shown / (total / divN) * 100) : 0;
+      var vs = '';
+      if (prevN && prev[name] != null) {
+        var d = shown - prev[name] / prevN;
+        vs = '<span class="' + (d >= 0 ? 'up' : 'down') + '">' + (d >= 0 ? '▲ +' : '▼ ') + Math.abs(Math.round(d)) + ' min</span> vs 上期';
+      }
+      return '<div class="card" style="cursor:default"><div class="card-head"><span class="card-label"><span class="dot" style="background:' + color + '"></span>' + name + '</span>' +
+        '<span class="card-date">' + (isDay ? '单日' : '日均') + '</span></div>' +
+        '<div class="card-value">' + fmtDur(shown) + '</div>' +
+        '<div class="card-sub">占比 ' + pct + '% ' + vs + (extraNote || '') + '</div></div>';
+    }
+    var deepPct = total ? Math.round((src.deep || 0) / total * 100) : 0;
+    var deepNote = deepPct && deepPct < 15 ? '<span style="color:#E5655A">· 偏低</span>' : (deepPct && deepPct > 25 ? '<span style="color:#E8A33D">· 偏高</span>' : '');
+    var eR = effCalc(asleepVal, src.inBed || 0);
+    var effNote = eR.abnormal ? '<span style="color:#E5655A">· 数据异常</span>' : (eR.v != null ? '· 效率 ' + Math.round(eR.v) + '%' : '· 无在床记录');
+    var html = '<div class="cards">' +
+      stageCard('浅睡', src.core || 0, '#4FC3B7') +
+      stageCard('深睡', src.deep || 0, '#7B6CF6', deepNote) +
+      stageCard('REM', src.rem || 0, '#9B8AFB') +
+      stageCard('清醒', src.awake || 0, '#E5655A') +
+      stageCard('在床', src.inBed || 0, '#3A4048', effNote) +
+      '</div>';
+    /* 堆叠构成条 + 图例（视觉总览） */
     var segs = [
       ['浅睡', src.core || 0, '#4FC3B7'],
       ['深睡', src.deep || 0, '#7B6CF6'],
       ['REM', src.rem || 0, '#9B8AFB'],
       ['清醒', src.awake || 0, '#E5655A']
     ];
-    var html = '<div class="stack-bar">' + segs.map(function (s) {
+    html += '<div class="stack-bar">' + segs.map(function (s) {
       return '<span style="width:' + (s[1] / total * 100).toFixed(1) + '%;background:' + s[2] + '"></span>';
     }).join('') + '</div>';
     html += '<div class="stack-legend">' + segs.map(function (s) {
       return '<span><i style="background:' + s[2] + '"></i>' + s[0] + ' ' + fmtDur(s[1]) + '（' + (total ? Math.round(s[1] / total * 100) : 0) + '%）</span>';
     }).join('') + '</div>';
-    if (day && day.inBed) {
-      var eR3 = effCalc(day.v, day.inBed);
-      html += '<div class="qual-note" style="margin-top:8px">在床 ' + fmtDur(day.inBed) + ' · 睡眠效率 ' + (eR3.abnormal ? '<span style="color:#E5655A">数据异常（在床记录缺失/矛盾）</span>' : (eR3.v != null ? Math.round(eR3.v) + '%' : '—')) +
-        (day.fallAsleepTs ? ' · 入睡 ' + fmtTime(localMinOf(day.fallAsleepTs)) : '') +
-        (day.wakeTs ? ' · 醒来 ' + fmtTime(localMinOf(day.wakeTs)) : '') + '</div>';
-    } else if (day) {
-      html += '<div class="qual-note" style="margin-top:8px">在床时长缺失，无法计算效率</div>';
+    if (day) {
+      html += '<div class="qual-note" style="margin-top:8px">' +
+        (day.fallAsleepTs ? '入睡 ' + fmtTime(localMinOf(day.fallAsleepTs)) + ' · ' : '') +
+        (day.wakeTs ? '醒来 ' + fmtTime(localMinOf(day.wakeTs)) + ' · ' : '') +
+        '在床 ' + fmtDur(day.inBed) + ' · 效率 ' + (eR.abnormal ? '<span style="color:#E5655A">数据异常</span>' : (eR.v != null ? Math.round(eR.v) + '%' : '—')) + '</div>';
     }
     el.innerHTML = html;
   }

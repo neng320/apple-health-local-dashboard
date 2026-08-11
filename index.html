@@ -290,6 +290,9 @@ select.other-select {
 .stack-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 
 /* 睡眠质量评分 */
+#sleep-stages .cards { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 960px) { #sleep-stages .cards { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 620px) { #sleep-stages .cards { grid-template-columns: 1fr; } }
 .score-row { display: flex; gap: 28px; align-items: center; flex-wrap: wrap; }
 .score-big { text-align: center; min-width: 150px; padding: 6px 18px; border-right: 1px solid var(--line-soft); }
 .score-num { font-family: var(--mono); font-size: 64px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
