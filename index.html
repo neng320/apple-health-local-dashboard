@@ -656,16 +656,18 @@ footer {
         </div>
         <div class="chart-meta" id="metric-mod-meta"></div>
       </div>
-      <div class="grid-2">
-        <div class="panel">
-          <div class="panel-head"><span class="panel-title">周规律热力</span><span class="panel-title" style="color:var(--faint)">WEEKLY · 当前指标</span></div>
-          <div class="panel-body"><div class="heat-wrap" id="metric-mod-heat"></div></div>
-          <div class="heat-meta"><span id="metric-mod-heat-label"></span><span>颜色越亮 = 数值越高</span></div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">周规律热力</span><span class="panel-title" style="color:var(--faint)">WEEKLY · 当前指标</span></div>
+        <div class="panel-body"><div class="heat-wrap" id="metric-mod-heat"></div></div>
+        <div class="heat-meta"><span id="metric-mod-heat-label"></span><span>颜色越亮 = 数值越高</span></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">周均柱状图</span><span class="panel-title" style="color:var(--faint)">近 12 周 · 每周均值</span></div>
+        <div class="chart-wrap">
+          <canvas class="mini-chart" id="metric-mod-bars" style="height:220px" role="img" aria-label="周均柱状图"></canvas>
+          <div class="chart-tip" id="metric-mod-bars-tip" hidden></div>
         </div>
-        <div class="panel">
-          <div class="panel-head"><span class="panel-title">统计摘要</span><span class="panel-title" style="color:var(--faint)">近 12 周</span></div>
-          <div class="panel-body" id="metric-mod-stats"></div>
-        </div>
+        <div class="panel-body" id="metric-mod-stats" style="padding-top:10px"></div>
       </div>
       <div class="panel">
         <div class="panel-head"><span class="panel-title">指标清单</span><span class="panel-title" style="color:var(--faint)">点击行查看分析</span></div>

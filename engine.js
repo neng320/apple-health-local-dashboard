@@ -170,7 +170,7 @@
     var slot = m.get(dk);
     if (!slot) {
       slot = { sum: 0, n: 0, min: Infinity, max: -Infinity, last: 0, lastTs: -1,
-               sleep: {}, sleepFirst: Infinity, sleepLast: -Infinity, hasLegacyAsleep: false };
+               sleep: {}, sleepFirst: Infinity, sleepLast: -Infinity, hasLegacyAsleep: false, hasNight: false };
       m.set(dk, slot);
     }
     return slot;
@@ -247,6 +247,7 @@
       var slot = daySlot(acc, 'sleep', dk);
       slot.sleep[stage] = (slot.sleep[stage] || 0) + durMin;
       if (stage === 'asleep') slot.hasLegacyAsleep = true;
+      if (isNight) slot.hasNight = true; /* 该天是否有晚间睡眠段（无晚间段视为设备未记录，全部口径跳过） */
       if (stage !== 'inBed' && stage !== 'awake' && isNight) {
         slot.sleepFirst = Math.min(slot.sleepFirst, d.ts);
         slot.sleepLast = Math.max(slot.sleepLast, e.ts);
@@ -476,6 +477,13 @@
             break;
           case 'sleep':
             var s = slot.sleep;
+            /* 无晚间段的天：设备未记录夜间睡眠（如仅午睡佩戴），全部口径跳过（归零），
+               其午睡数据仅在午睡口径展示（仅对「全部」口径生效） */
+            if (key === 'sleep' && !slot.hasNight) {
+              item.v = 0; item.inBed = 0; item.core = 0; item.deep = 0; item.rem = 0; item.awake = 0;
+              item.nightMissing = 1;
+              break;
+            }
             /* Apple 可能同时导出细分阶段（Core/Deep/REM）与粗粒度 Asleep/Unspecified，
                二者覆盖同一时段（重叠）。细分存在时优先用细分和，否则用粗粒度。 */
             var hasSub = (s.core || 0) + (s.deep || 0) + (s.rem || 0) > 0;

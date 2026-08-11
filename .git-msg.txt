@@ -1,0 +1,1 @@
+v2.3: sleep card bedtime hint + circular avg fix + full-width metric heatmap & weekly bars + skip nap-only days

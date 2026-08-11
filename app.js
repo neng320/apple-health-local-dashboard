@@ -1242,8 +1242,13 @@
     days.forEach(function (d) {
       a.asleep += d.v; a.deep += d.deep; a.rem += d.rem; a.core += d.core; a.awake += d.awake; a.inBed += d.inBed;
       if (d.v > 0 || d.inBed > 0) a.n++;
-      if (d.fallAsleepTs) { a.fallSum += localMinOf(d.fallAsleepTs); a.tN++; }
-      if (d.wakeTs) { a.wakeSum += localMinOf(d.wakeTs); }
+      /* 入睡时间环形平均：>=12:00 的按前半夜（-1440）归一，避免 23:xx 与 00:xx 平均失真 */
+      if (d.fallAsleepTs) {
+        var fm = localMinOf(d.fallAsleepTs);
+        a.fallSum += (fm >= 720 ? fm - 1440 : fm);
+        a.tN++;
+      }
+      if (d.wakeTs) a.wakeSum += localMinOf(d.wakeTs);
     });
     return a;
   }
@@ -1302,9 +1307,14 @@
   function renderSleepCards(agg, inWin, prevAgg, isDay, prevCur) {
     var cards = [];
     function card(label, value, sub, color, cls) {
-      cards.push('<div class="card ' + (cls || '') + (value ? '' : ' no-data') + '" style="cursor:default"><div class="card-head"><span class="card-label"><span class="dot" style="background:' + color + '"></span>' + label + '</span></div>' +
+      cards.push('<div class="card ' + (cls || '') + (value ? '' : ' no-data') + '" style="cursor:default"><div class="card-head"><span class="card-label"><span class="dot" style="background:' + color + '"></span>' + label + '</span>' +
+        '<span class="card-date"></span></div>' +
         '<div class="card-value">' + (value || 'NO DATA') + '</div><div class="card-sub">' + (sub || '&nbsp;') + '</div></div>');
     }
+    /* 入睡/醒来时间（日=具体时间，周/月/季/半年/年=窗口平均；无数据跳过） */
+    var fallMin = isDay ? (inWin[0] && inWin[0].fallAsleepTs ? localMinOf(inWin[0].fallAsleepTs) : null) : avgCircular(agg, 'fall');
+    var wakeMin = isDay ? (inWin[0] && inWin[0].wakeTs ? localMinOf(inWin[0].wakeTs) : null) : (agg.tN ? agg.wakeSum / agg.tN : null);
+    var twHtml = (fallMin != null ? '入睡 ' + fmtTime(fallMin) : '') + (fallMin != null && wakeMin != null ? ' · ' : '') + (wakeMin != null ? '醒 ' + fmtTime(wakeMin) : '');
     function vsPrev(curVal, prevVal, suffix, betterLower) {
       if (prevVal == null || !curVal) return '';
       var delta = curVal - prevVal;
@@ -1353,15 +1363,16 @@
       var curRem = isDay ? (inWin[0] ? inWin[0].rem : 0) : (agg.n ? agg.rem / agg.n : 0);
       card('REM', fmtDur(curRem), '占比 ' + (curAsleep ? Math.round(curRem / curAsleep * 100) : 0) + '%', '#9B8AFB');
       var eff = agg.inBed ? Math.round(agg.asleep / agg.inBed * 100) : null;
-      card('睡眠效率', eff != null ? eff + '<small>%</small>' : '', eff != null ? (eff > 90 ? '良好' : eff > 80 ? '正常' : '偏低') : '在床时长缺失', '#E8A33D', 'amber');
-      var fallMin = isDay ? (inWin[0] && inWin[0].fallAsleepTs ? localMinOf(inWin[0].fallAsleepTs) : null) : avgCircular(agg, 'fall');
-      var wakeMin = isDay ? (inWin[0] && inWin[0].wakeTs ? localMinOf(inWin[0].wakeTs) : null) : (agg.tN ? agg.wakeSum / agg.tN : null);
-      card('入睡时间', fmtTime(fallMin), isDay ? '' : '窗口内平均', '#4FC3B7', 'cyan');
-      card('醒来时间', fmtTime(wakeMin), isDay ? '' : '窗口内平均', '#4FC3B7', 'cyan');
+      var effR = effCalc(agg.asleep, agg.inBed);
+      var eff = effR.v;
+      card('睡眠效率', eff != null ? Math.round(eff) + '<small>%</small>' : (effR.abnormal ? '数据异常' : ''), effR.abnormal ? '<span style="color:#E5655A">在床记录缺失/矛盾（asleep>inBed）</span>' : (eff != null ? (eff > 90 ? '良好' : eff > 80 ? '正常' : '偏低') : '在床时长缺失'), '#E8A33D', 'amber');
     } else {
-      ['总睡眠', '深睡', 'REM', '睡眠效率', '入睡时间', '醒来时间'].forEach(function (l) { card(l, '', '', '#9B8AFB'); });
+      ['总睡眠', '深睡', 'REM', '睡眠效率'].forEach(function (l) { card(l, '', '', '#9B8AFB'); });
     }
     $('sleep-cards').innerHTML = cards.join('');
+    /* 总睡眠卡右上角：入睡/醒来时间 */
+    var twTarget = $('sleep-cards').querySelector('.card .card-date');
+    if (twTarget) twTarget.textContent = twHtml;
   }
   /* 睡眠质量评分（参考 Apple Sleep Score：时长 / 效率 / 深睡 / 规律）
    * 时长：7.5h=100 理想、6h=60 及格，线性插值
@@ -1564,16 +1575,11 @@
   }
   function avgCircular(agg, which) {
     if (!agg.tN) return null;
-    var sum = which === 'fall' ? agg.fallSum : agg.wakeSum;
-    /* 简单环形平均：>720 的按 -1440 处理（针对入睡） */
     if (which === 'fall') {
-      var corrected = 0;
-      /* 重新统计需要原始值——用近似：若均值 >720 则整体偏移 */
-      var avg = sum / agg.tN;
-      if (avg >= 720) avg -= 1440;
-      return avg;
+      var avg = agg.fallSum / agg.tN; /* 已归一（-1440 偏移） */
+      return avg < 0 ? avg + 1440 : avg;
     }
-    return sum / agg.tN;
+    return agg.wakeSum / agg.tN;
   }
   function drawSleepDayView(canvas, day, segs, stackDays) {
     var c = setupCanvas(canvas, 340);
@@ -2610,7 +2616,7 @@
     $('metric-mod-heat-label').textContent = rng.list.length + ' 天 · ' + shortDay(rng.list[0].ts, true) + ' → ' + shortDay(rng.list[rng.list.length - 1].ts, true);
     renderHeatGrid(heatWrap, rng.list, lib.color, 0, lib.label, $('metric-mod-tip'), function (v) { return mmFmt(v, lib.unit, lib.kind); });
 
-    /* 统计摘要（近 12 周） */
+    /* 周均柱状图（近 12 周）+ 统计摘要 */
     var weeks = [];
     if (days.length) {
       var endKey = days[days.length - 1].d;
@@ -2619,10 +2625,19 @@
         var wkStart = dayKeyAdd(ws, -i * 7), wkEnd = dayKeyAdd(wkStart, 6);
         var wDays = windowDays(days, wkStart, wkEnd);
         var wAgg = aggMetricDays(wDays);
-        weeks.push({ wk: wkStart.slice(5), v: wAgg.n ? (lib.kind === 'last' ? wAgg.last : wAgg.sum / wAgg.n) : null, n: wAgg.n });
+        weeks.push({ d: wkStart.slice(5) + '周', ts: HE.dkToTs(wkStart), v: wAgg.n ? (lib.kind === 'last' ? wAgg.last : wAgg.sum / wAgg.n) : null, n: wAgg.n });
       }
     }
     var wkVals = weeks.filter(function (w) { return w.v != null; });
+    /* 柱状图绘制 */
+    var bc = $('metric-mod-bars');
+    var bWrap = bc.parentElement;
+    clearEmpty(bWrap);
+    if (wkVals.length >= 2) {
+      drawMetricBars(bc, wkVals, lib);
+    } else {
+      emptyState(bc, '数据不足以绘制周均柱状图');
+    }
     var statsHtml = '';
     if (wkVals.length) {
       var vals = wkVals.map(function (w) { return w.v; });
@@ -2636,12 +2651,52 @@
         '<div class="qual-item"><div class="k">有数据周数</div><div class="v">' + wkVals.length + '/12</div></div>' +
         '</div>';
       if (lib.kind !== 'last') {
-        statsHtml += '<div class="qual-note" style="margin-top:8px">趋势周均：' + wkVals.map(function (w) { return w.wk + ' ' + mmFmt(w.v, lib.unit); }).join(' · ') + '</div>';
+        statsHtml += '<div class="qual-note" style="margin-top:8px">趋势周均：' + wkVals.map(function (w) { return w.d + ' ' + mmFmt(w.v, lib.unit); }).join(' · ') + '</div>';
       }
     } else {
       statsHtml = '<div class="qual-note">数据不足以计算周统计。</div>';
     }
     $('metric-mod-stats').innerHTML = statsHtml;
+  }
+  /* 周均柱状图（通用指标） */
+  function drawMetricBars(canvas, list, lib) {
+    var c = setupCanvas(canvas);
+    var ctx = c.ctx, W = c.W, H = c.H;
+    var padL = 56, padR = 16, padT = 16, padB = 28;
+    var vals = list.map(function (d) { return d.v; });
+    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+    if (mn === mx) { mn -= 1; mx += 1; }
+    var sc = niceScale(mn, mx, 4);
+    var yMin = sc[0], yMax = sc[1], step = sc[2], frac = sc[3];
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var yOf = function (v) { return padT + (1 - (v - yMin) / (yMax - yMin)) * plotH; };
+    var n = list.length;
+    var bw = Math.max(3, Math.min(42, plotW / n * 0.5));
+    ctx.clearRect(0, 0, W, H);
+    drawGrid(ctx, W, H, padL, padR, padT, padB, yMin, yMax, step, function (v) { return frac ? v.toFixed(frac) : fmtNum(Math.round(v)); });
+    list.forEach(function (d, i) {
+      var x = padL + (i + 0.5) * (plotW / n) - bw / 2;
+      var h = yOf(0) - yOf(d.v);
+      var base = yOf(Math.max(0, d.v));
+      var grad = ctx.createLinearGradient(0, base - h, 0, base);
+      grad.addColorStop(0, lib.color);
+      grad.addColorStop(1, lib.color + '33');
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, base - h, bw, h);
+    });
+    ctx.save();
+    ctx.fillStyle = '#6B7480';
+    ctx.font = '10.5px ui-monospace, Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    list.forEach(function (d, i) {
+      ctx.fillText(d.d, padL + (i + 0.5) * (plotW / n), H - padB + 4);
+    });
+    ctx.restore();
+    attachTip(canvas, $('metric-mod-bars-tip'), function (i) { return padL + (i + 0.5) * (plotW / n); }, function (d) { return yOf(d.v); }, list, function (d) {
+      return '<div class="t-date">' + d.d + '</div><div class="t-row"><span>周均</span><b>' + mmFmt(d.v, lib.unit, lib.kind) + '</b></div>' +
+        '<div class="t-row"><span>记录天数</span><b>' + d.n + ' 天</b></div>';
+    });
   }
   function renderOthers() {
     buildMetricLib();
