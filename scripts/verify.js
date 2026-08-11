@@ -119,7 +119,7 @@ if (fs.existsSync(STRESS)) {
   check('心率原始序列采样存在', !!res2.heartRaw && res2.heartRaw.ts.length > 100000,
     res2.heartRaw ? res2.heartRaw.ts.length + ' 条' : '无');
 } else {
-  check('压力文件存在', false, '未生成，先运行 node scripts/make-stress.js');
+  console.log('  SKIP: 压力文件未包含（export-stress.xml 已在 .gitignore，可运行 node scripts/make-stress.js 生成后复验）');
 }
 
 /* ============ 3. 异常输入 ============ */

@@ -1,0 +1,9 @@
+# 统一行尾为 LF（防止 Windows/Unix 检出差异）
+* text=auto
+*.js text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
+*.sh text eol=lf

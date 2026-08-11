@@ -17,6 +17,15 @@
 
 > 接手开发请看 [HANDOVER.md](HANDOVER.md)（能力清单/文件职责/环境/同步指南）。
 
+## 下载即用（GitHub）
+
+1. GitHub 仓库页 → Code → **Download ZIP**（或 `git clone https://github.com/neng320/apple-health-local-dashboard.git`）
+2. 解压后双击 `index.html`（任意现代浏览器）
+3. 把 iPhone 导出的 `export.xml` 拖入页面即可
+4. 已验证：`file://` 双击打开 + 导入 XML 全流程可用（仓库自带 `scripts/_file-protocol-test.js` 可复验）；示例数据 `sample/export.xml`（1.5 年模拟）已包含在仓库，可先体验
+
+> 注意：`export-stress.xml`（75MB 压力数据）与个人真实数据不入库；如需压力测试可 `node scripts/make-stress.js` 生成。
+
 ---
 
 ## 一、三大核心模块
