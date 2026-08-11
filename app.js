@@ -1,5 +1,5 @@
 /* ============================================================
- * app.js — VITALS//ARK 看板逻辑（概览 / 睡眠 / 心率 / 其他指标）
+ * app.js — Apple Health 本地看板 看板逻辑（概览 / 睡眠 / 心率 / 其他指标）
  * 依赖: engine.js（window.HealthEngine）
  * ============================================================ */
 (function () {
@@ -807,7 +807,7 @@
       pw.hidden = true;
       renderBadges();
       switchModule('overview');
-      try { document.title = 'VITALS//ARK — ' + res.stats.recordCount.toLocaleString() + ' 条记录 · READY'; } catch (e) {}
+      try { document.title = 'Apple Health 本地看板 — ' + res.stats.recordCount.toLocaleString() + ' 条记录 · READY'; } catch (e) {}
     }).catch(function (err) {
       pw.hidden = true;
       $('dash').hidden = true;

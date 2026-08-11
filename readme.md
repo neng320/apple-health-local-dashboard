@@ -1,4 +1,4 @@
-# VITALS//ARK — Apple Health 本地数据看板
+# Apple Health 本地看板
 
 完全本地运行的 Apple Health 数据可视化终端。深色数据风格，**数据解析与渲染全部在浏览器内完成，不联网、不上传、不留存**。
 

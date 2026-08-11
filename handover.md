@@ -1,4 +1,4 @@
-# VITALS//ARK — 项目交接文档（Handover）
+# Apple Health 本地看板 — 项目交接文档（Handover）
 
 > 本文档供接手方（IDE / 开发者）快速了解项目全貌，并按 GitHub 标准完成同步与后续开发。
 > 生成日期：2026-08-11 · 版本：v2.0
@@ -7,7 +7,7 @@
 
 ## 1. 项目是什么
 
-**VITALS//ARK** 是一个**完全本地运行**的 Apple Health 数据可视化看板：
+**Apple Health 本地看板** 是一个**完全本地运行**的 Apple Health 数据可视化看板：
 
 - 输入：iPhone「健康」App 导出的 `export.xml`（几十 MB ~ 数百 MB）
 - 输出：深色数据看板（概览 / 睡眠 / 心率 / 其他指标四大模块），在浏览器中打开

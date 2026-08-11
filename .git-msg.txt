@@ -1,1 +1,0 @@
-v2.1.1: strict sleep efficiency (0-100%, abnormal when inBed missing, no phantom >100%)
