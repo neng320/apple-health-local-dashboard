@@ -1,0 +1,1 @@
+v2.1: nap mode no scoring + nap duration grading (0.5-1h normal, >1.5h abnormal)

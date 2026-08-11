@@ -102,9 +102,19 @@
     if (v > 480) return { label: '高于日常', color: '#E8A33D' };
     return { label: '正常范围', color: '#63C77F' };
   }
+  /* 午睡时长分级（分钟）：0.5–1h 正常 / 1–1.5h 偏长 / >1.5h 异常 */
+  function napStatus(v) {
+    if (v == null || v <= 0) return null;
+    if (v > 90) return { label: '午睡过长（异常）', color: '#E5655A' };
+    if (v > 60) return { label: '午睡偏长', color: '#E8A33D' };
+    if (v < 30) return { label: '短午睡', color: '#4FC3B7' };
+    return { label: '正常午睡', color: '#63C77F' };
+  }
+  /* 按当前口径取状态分级 */
+  function statusOf(v) { return state.sleepMode === 'nap' ? napStatus(v) : sleepStatus(v); }
   function sleepStatusHtml(v) {
-    var st = sleepStatus(v);
-    return st ? '<span style="color:' + st.color + '">' + (st.label.indexOf('不足') >= 0 ? '⚠ ' : st.label.indexOf('高于') >= 0 ? '⚠ ' : '') + st.label + '</span>' : '';
+    var st = statusOf(v);
+    return st ? '<span style="color:' + st.color + '">' + (st.label.indexOf('不足') >= 0 || st.label.indexOf('过长') >= 0 ? '⚠ ' : st.label.indexOf('高于') >= 0 ? '⚠ ' : '') + st.label + '</span>' : '';
   }
   function pctDelta(cur, prev) {
     if (!prev) return null;
@@ -426,9 +436,9 @@
     /* 状态标记 */
     function statusDot(d, x, isPrev) {
       if (isPrev || !d || !d.v) return;
-      var st = sleepStatus(d.v);
+      var st = statusOf(d.v);
       if (!st) return;
-      if (st.label.indexOf('不足') >= 0 || st.label.indexOf('高于') >= 0) {
+      if (st.label.indexOf('不足') >= 0 || st.label.indexOf('高于') >= 0 || st.label.indexOf('过长') >= 0) {
         ctx.fillStyle = st.color;
         ctx.beginPath(); ctx.arc(x, yOf(d.v) - 8, st.label.indexOf('严重') >= 0 ? 4 : 3.2, 0, Math.PI * 2); ctx.fill();
         if (st.label.indexOf('严重') >= 0) {
@@ -828,10 +838,10 @@
     return d && d.days.length ? d.days[d.days.length - 1].d : null;
   }
   function lastSleepDay() {
-    var d = state.res.daily.sleep;
-    if (!d || !d.days.length) return null;
-    for (var i = d.days.length - 1; i >= 0; i--) if (d.days[i].v > 0) return d.days[i].d;
-    return d.days[d.days.length - 1].d;
+    var days = sleepAllDays();
+    if (!days || !days.length) return null;
+    for (var i = days.length - 1; i >= 0; i--) if (days[i].v > 0) return days[i].d;
+    return days[days.length - 1].d;
   }
   function switchModule(m) {
     state.module = m;
@@ -1127,6 +1137,7 @@
   function sleepDataDays() { return sleepAllDays().filter(function (d) { return d.v > 0 || d.inBed > 0; }); }
   function setSleepMode(m) {
     state.sleepMode = m;
+    state.sleepCur = lastSleepDay();
     document.querySelectorAll('#sleep-mode-tabs .tab').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-mode') === m); });
     renderSleep();
   }
@@ -1267,7 +1278,7 @@
       var curAsleep = isDay ? (inWin[0] ? inWin[0].v : 0) : (agg.n ? agg.asleep / agg.n : 0);
       var prevAsleep = prevAgg ? (isDay ? (prevAgg.n ? prevAgg.asleep : null) : (prevAgg.n ? prevAgg.asleep / prevAgg.n : 0)) : null;
       var statusHtml2 = (function () {
-        var st = sleepStatus(curAsleep);
+        var st = statusOf(curAsleep);
         if (!st) return '';
         var warn = st.label.indexOf('不足') >= 0 || st.label.indexOf('高于') >= 0;
         return '<span style="color:' + st.color + '">' + (warn ? '⚠ ' : '') + st.label + (st.label.indexOf('严重') >= 0 ? ' · 需重点关注' : '') + '</span>';
@@ -1330,6 +1341,10 @@
   }
   function renderSleepScore(agg, day) {
     var el = $('sleep-score-body');
+    if (state.sleepMode === 'nap') {
+      el.innerHTML = '<div class="qual-note">午睡不参与睡眠质量评分。评分仅针对晚间睡眠（18:00–次日 10:30 开始的主睡眠段），午睡请关注时长合理性（0.5–1h 正常，&gt;1.5h 异常）。</div>';
+      return;
+    }
     var sc = sleepScoreCalc(agg, day);
     if (!agg.n && !day) {
       el.innerHTML = '<div class="qual-note">该窗口内没有睡眠数据，无法评分。</div>';
@@ -1431,6 +1446,13 @@
     return parts.length ? parts.join('；') : '近 7 天状态良好，继续保持规律作息';
   }
   function renderSleepHistory() {
+    var canvas = $('sleep-history-chart');
+    if (state.sleepMode === 'nap') {
+      clearEmpty(canvas.parentElement);
+      emptyState(canvas, '午睡不参与评分，无评分历史');
+      $('sleep-history-meta').innerHTML = '<span><b>说明：</b>评分历史仅针对晚间睡眠口径。</span>';
+      return;
+    }
     var days = sleepDataDays().slice(-90);
     var canvas = $('sleep-history-chart');
     clearEmpty(canvas.parentElement);
@@ -1526,8 +1548,8 @@
         ctx.strokeRect(x - 3, topH + padT, bw + 6, plotH);
       }
       /* 状态分级点 */
-      var st = sleepStatus(d.v);
-      if (st && (st.label.indexOf('不足') >= 0 || st.label.indexOf('高于') >= 0)) {
+      var st = statusOf(d.v);
+      if (st && (st.label.indexOf('不足') >= 0 || st.label.indexOf('高于') >= 0 || st.label.indexOf('过长') >= 0)) {
         ctx.fillStyle = st.color;
         ctx.beginPath(); ctx.arc(xOf(i) + bw / 2, yOf(d.v) - 7, st.label.indexOf('严重') >= 0 ? 3.8 : 3, 0, Math.PI * 2); ctx.fill();
       }
@@ -1656,11 +1678,19 @@
     var list = weeks.filter(function (w) { return w.v != null; });
     if (!list.length) { emptyState($('sleep-trend-chart'), '数据不足'); return; }
     var goal = state.res.daily.sleepGoal && state.res.daily.sleepGoal.days.length ? state.res.daily.sleepGoal.days[state.res.daily.sleepGoal.days.length - 1].v : null;
-    var goals = [
-      { v: 5.5, label: '睡眠不足线 5.5h', color: 'rgba(229,101,90,0.7)' },
-      { v: 8, label: '偏高线 8h', color: 'rgba(232,163,61,0.7)' }
-    ];
-    if (goal) goals.push({ v: goal, label: '目标 ' + goal + 'h', color: 'rgba(79,195,183,0.7)' });
+    var goals;
+    if (state.sleepMode === 'nap') {
+      goals = [
+        { v: 0.5, label: '正常下限 0.5h', color: 'rgba(99,199,127,0.7)' },
+        { v: 1.5, label: '异常线 1.5h', color: 'rgba(229,101,90,0.7)' }
+      ];
+    } else {
+      goals = [
+        { v: 5.5, label: '睡眠不足线 5.5h', color: 'rgba(229,101,90,0.7)' },
+        { v: 8, label: '偏高线 8h', color: 'rgba(232,163,61,0.7)' }
+      ];
+      if (goal) goals.push({ v: goal, label: '目标 ' + goal + 'h', color: 'rgba(79,195,183,0.7)' });
+    }
     drawLineChart($('sleep-trend-chart'), list, { label: '周均睡眠', unit: 'h', color: '#9B8AFB' }, {
       tipEl: $('sleep-trend-tip'),
       goals: goals,
@@ -1681,10 +1711,10 @@
     var days = rng.list.map(function (d) { return { d: d.d, ts: d.ts, v: d.v }; });
     $('sleep-heat-label').textContent = days.length + ' 天 · ' + shortDay(days[0].ts, true) + ' → ' + shortDay(days[days.length - 1].ts, true);
     renderHeatGrid(wrap, days, 'rgba(155,138,251,1)', 0, '睡眠时长', $('sleep-trend-tip'), function (v) { return fmtDur(v); }, function (cell) {
-      var st = sleepStatus(cell.v);
+      var st = statusOf(cell.v);
       if (!st) return 'rgba(155,138,251,1)';
-      if (st.label.indexOf('严重') >= 0) return 'rgba(229,101,90,1)';
-      if (st.label.indexOf('不足') >= 0) return 'rgba(245,158,107,1)';
+      if (st.label.indexOf('严重') >= 0 || st.label.indexOf('过长') >= 0) return 'rgba(229,101,90,1)';
+      if (st.label.indexOf('不足') >= 0 || st.label.indexOf('偏长') >= 0) return 'rgba(245,158,107,1)';
       if (st.label.indexOf('高于') >= 0) return 'rgba(232,163,61,1)';
       return 'rgba(155,138,251,1)';
     });
@@ -1765,8 +1795,8 @@
         ctx.fillRect(x, y - h, bw, h);
         y -= h;
       });
-      var st = sleepStatus(d.v);
-      if (st && (st.label.indexOf('不足') >= 0 || st.label.indexOf('高于') >= 0)) {
+      var st = statusOf(d.v);
+      if (st && (st.label.indexOf('不足') >= 0 || st.label.indexOf('高于') >= 0 || st.label.indexOf('过长') >= 0)) {
         ctx.fillStyle = st.color;
         ctx.beginPath(); ctx.arc(xOf(i), yOfS(d.v) - 6, st.label.indexOf('严重') >= 0 ? 3.6 : 2.8, 0, Math.PI * 2); ctx.fill();
       }
