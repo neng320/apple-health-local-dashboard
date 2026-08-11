@@ -1,0 +1,18 @@
+# ===== 隐私数据（切勿提交）=====
+# 真实 Apple Health 导出包含完整个人健康数据
+sample/export-real.xml
+sample/export-real*.xml
+
+# ===== 大数据文件（可选自行生成）=====
+sample/export-stress.xml
+
+# ===== 测试/临时产物 =====
+.verify/
+edge-*/
+*.log
+.DS_Store
+Thumbs.db
+
+# ===== Node =====
+node_modules/
+npm-debug.log*

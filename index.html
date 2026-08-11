@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VITALS//ARK — Apple Health 本地数据终端</title>
+<meta name="description" content="完全本地运行的 Apple Health 数据可视化看板。数据解析与渲染全部在浏览器内完成，不联网、不上传。">
+<style>
+/* ============================================================
+   VITALS//ARK — 暗色数据终端（AutoClaw 暗色调 · 克制科技感）
+   纯本地 · 零外部资源 · 零网络请求
+   ============================================================ */
+:root {
+  --bg: #0F1115;
+  --bg-soft: #12151A;
+  --panel: #171A20;
+  --panel-2: #1D2128;
+  --line: rgba(255, 255, 255, 0.10);
+  --line-soft: rgba(255, 255, 255, 0.055);
+  --text: #E7EAEE;
+  --muted: #9AA3AD;
+  --faint: #6B7480;
+  --amber: #E8A33D;
+  --amber-bright: #F2B45C;
+  --cyan: #4FC3B7;
+  --violet: #9B8AFB;
+  --red: #E5655A;
+  --green: #63C77F;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, "Roboto Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scrollbar-color: #333A44 var(--bg); }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.55;
+  min-height: 100vh;
+}
+/* 背景网格（极淡，纯装饰） */
+.bg-decor {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.022) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 100% 80% at 50% 0%, #000 35%, transparent 100%);
+}
+#app { position: relative; z-index: 1; max-width: 1400px; margin: 0 auto; padding: 0 20px 56px; }
+
+/* ---- 顶栏 ---- */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  padding: 16px 2px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.brand-name {
+  font-family: var(--mono); font-size: 19px; font-weight: 700; letter-spacing: 2px;
+  color: var(--text);
+}
+.brand-name::before { content: "◈ "; color: var(--amber); }
+.brand-sub { font-family: var(--mono); font-size: 11px; letter-spacing: 1.6px; color: var(--faint); text-transform: uppercase; }
+.top-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.privacy-badge {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 1px;
+  color: var(--cyan); border: 1px solid rgba(79,195,183,.35);
+  padding: 4px 10px; border-radius: 4px;
+  background: rgba(79,195,183,.06);
+}
+.btn {
+  font-family: var(--mono); font-size: 12px; letter-spacing: 1px;
+  color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--line);
+  padding: 7px 14px; cursor: pointer; border-radius: 4px;
+  transition: background .12s, border-color .12s;
+}
+.btn:hover { background: #242A33; border-color: rgba(255,255,255,.2); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }
+
+/* ---- 模块导航 ---- */
+.module-nav {
+  display: flex; gap: 2px; margin: 14px 0 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.mnav {
+  font-family: var(--mono); font-size: 12.5px; letter-spacing: 1.5px;
+  color: var(--muted); background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: 9px 16px; cursor: pointer; text-transform: uppercase;
+  transition: color .12s;
+}
+.mnav:hover { color: var(--text); }
+.mnav.active { color: var(--amber-bright); border-bottom-color: var(--amber); }
+.mnav .badge {
+  display: inline-block; margin-left: 6px; padding: 1px 7px;
+  font-size: 10px; border-radius: 8px; background: rgba(232,163,61,.12);
+  color: var(--amber); vertical-align: 1px;
+}
+.mnav.active .badge { background: rgba(232,163,61,.22); }
+
+/* ---- 落地页 ---- */
+#landing { padding: 48px 0 30px; }
+.hero { text-align: center; max-width: 680px; margin: 0 auto; }
+.hero h1 { font-family: var(--mono); font-size: 30px; font-weight: 700; letter-spacing: 4px; color: var(--text); }
+.hero h1 em { font-style: normal; color: var(--amber); }
+.hero-sub { color: var(--muted); font-size: 13px; margin-top: 8px; letter-spacing: 1px; }
+.drop-zone {
+  margin: 30px auto 0; max-width: 600px; padding: 40px 24px;
+  border: 1px dashed var(--line); border-radius: 6px; cursor: pointer;
+  background: var(--panel);
+  transition: border-color .15s, background .15s;
+}
+.drop-zone.drag { border-color: var(--amber); background: #1B1E24; }
+.dz-icon {
+  width: 40px; height: 40px; margin: 0 auto 12px; position: relative;
+  border: 1.5px solid var(--faint); border-radius: 50%;
+}
+.dz-icon::before { content: ""; position: absolute; inset: 10px; border: 1.5px solid var(--faint); border-radius: 50%; }
+.dz-icon::after { content: ""; position: absolute; left: 50%; top: 11px; width: 1.5px; height: 17px; background: var(--amber); transform: translateX(-50%); }
+.dz-text { font-size: 14.5px; }
+.dz-link { color: var(--amber-bright); text-decoration: underline; text-underline-offset: 3px; }
+.dz-hint { margin-top: 6px; font-size: 12px; color: var(--faint); font-family: var(--mono); letter-spacing: .5px; }
+.howto {
+  margin: 22px auto 0; max-width: 600px; text-align: left;
+  border: 1px solid var(--line-soft); border-radius: 6px; padding: 14px 18px;
+  background: var(--panel);
+}
+.howto-title { font-family: var(--mono); font-size: 11px; letter-spacing: 1.6px; color: var(--cyan); margin-bottom: 8px; }
+.howto ol { padding-left: 20px; color: var(--muted); font-size: 13px; }
+.howto li { margin: 4px 0; }
+.howto b { color: var(--text); font-weight: 600; }
+
+/* ---- 进度 ---- */
+#progress-wrap { max-width: 680px; margin: 24px auto; }
+.prog-label { font-family: var(--mono); font-size: 11px; letter-spacing: 1px; color: var(--muted); display: flex; justify-content: space-between; margin-bottom: 6px; }
+.prog-track { height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
+.prog-fill { height: 100%; width: 0%; background: var(--amber); transition: width .15s; }
+
+/* ---- 摘要条 ---- */
+#summary-strip {
+  display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center;
+  border: 1px solid var(--line-soft); background: var(--panel);
+  padding: 10px 16px; margin-bottom: 14px; border-radius: 6px;
+  font-family: var(--mono); font-size: 12px;
+}
+.sum-item { display: flex; flex-direction: column; gap: 1px; }
+.sum-item .k { font-size: 10px; letter-spacing: 1.4px; color: var(--faint); text-transform: uppercase; }
+.sum-item .v { color: var(--text); letter-spacing: .5px; }
+.sum-item .v.cyan { color: var(--cyan); }
+
+/* ---- 指标卡 ---- */
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.card {
+  position: relative;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel);
+  padding: 13px 15px 11px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.card:hover { border-color: rgba(255,255,255,.22); background: #1A1E25; }
+.card::before, .card::after {
+  content: ""; position: absolute; width: 8px; height: 8px;
+  border: 1px solid var(--faint); pointer-events: none; opacity: .7;
+}
+.card::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.card::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+.card-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.card-label { font-family: var(--mono); font-size: 11px; letter-spacing: 1.6px; color: var(--muted); text-transform: uppercase; }
+.card-label .dot { display: inline-block; width: 7px; height: 7px; border-radius: 2px; margin-right: 7px; vertical-align: 1px; }
+.card-date { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+.card-value {
+  font-family: var(--mono); font-size: 34px; font-weight: 600; line-height: 1.15;
+  color: var(--text); letter-spacing: .5px; font-variant-numeric: tabular-nums;
+}
+.card-value small { font-size: 13px; font-weight: 400; color: var(--faint); margin-left: 4px; letter-spacing: 1px; }
+.card-sub { margin-top: 5px; font-family: var(--mono); font-size: 11px; color: var(--muted); min-height: 15px; }
+.card-sub .up { color: var(--green); }
+.card-sub .down { color: var(--red); }
+.card.amber .card-label { color: var(--amber); }
+.card.cyan .card-label { color: var(--cyan); }
+.card.cyan .card-value { color: var(--text); }
+.card.violet .card-label { color: var(--violet); }
+.card.no-data .card-value { color: var(--faint); font-size: 22px; line-height: 1.8; }
+.card-spark { position: absolute; right: 12px; bottom: 10px; opacity: .9; }
+
+/* ---- 面板 ---- */
+.panel {
+  border: 1px solid var(--line-soft); border-radius: 6px;
+  background: var(--panel);
+  margin-bottom: 14px;
+  position: relative;
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.panel-title { font-family: var(--mono); font-size: 11px; letter-spacing: 1.8px; color: var(--muted); text-transform: uppercase; }
+.panel-title::before { content: "▮ "; color: var(--amber); font-size: 9px; }
+.panel-title.cyan::before { color: var(--cyan); }
+.panel-title.violet::before { color: var(--violet); }
+.panel-body { padding: 12px 14px; }
+.panel-body.no-pad { padding: 0; }
+
+/* tabs */
+.tabs { display: flex; gap: 2px; flex-wrap: wrap; align-items: center; }
+.tab {
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 1px;
+  color: var(--muted); background: none; border: 1px solid transparent;
+  padding: 5px 11px; cursor: pointer; border-radius: 4px;
+  transition: all .1s;
+}
+.tab:hover { color: var(--text); background: var(--panel-2); }
+.tab.active { color: var(--amber-bright); background: rgba(232,163,61,.10); border-color: rgba(232,163,61,.35); }
+.range-tabs .tab.active { color: var(--cyan); background: rgba(79,195,183,.08); border-color: rgba(79,195,183,.32); }
+select.other-select {
+  font-family: var(--mono); font-size: 11.5px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 4px; padding: 4px 8px;
+}
+
+/* 粒度导航（日/周/月 + 光标） */
+.gran-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gran-cursor { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12.5px; color: var(--text); letter-spacing: .5px; }
+.gran-cursor .cur-label { min-width: 150px; }
+.nav-btn {
+  font-family: var(--mono); font-size: 13px; color: var(--muted);
+  background: var(--panel-2); border: 1px solid var(--line);
+  width: 28px; height: 26px; border-radius: 4px; cursor: pointer;
+  transition: background .1s;
+}
+.nav-btn:hover { background: #242A33; color: var(--text); }
+.nav-btn:disabled { opacity: .35; cursor: default; }
+
+/* 图表 */
+.chart-wrap { position: relative; }
+#main-chart { display: block; width: 100%; height: 360px; }
+.mini-chart { display: block; width: 100%; height: 220px; }
+.chart-tip {
+  position: absolute; z-index: 20; pointer-events: none;
+  background: #1B1F26; border: 1px solid var(--line);
+  border-radius: 4px; padding: 8px 12px;
+  font-family: var(--mono); font-size: 11px; letter-spacing: .3px;
+  min-width: 150px; color: var(--text);
+  box-shadow: 0 4px 18px rgba(0,0,0,.45);
+}
+.chart-tip .t-date { color: var(--cyan); margin-bottom: 4px; letter-spacing: 1px; }
+.chart-tip .t-row { display: flex; justify-content: space-between; gap: 14px; color: var(--muted); }
+.chart-tip .t-row b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.chart-empty {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+  color: var(--faint); font-family: var(--mono); letter-spacing: 2px; font-size: 12.5px;
+}
+.chart-empty .em-line { width: 48px; height: 1px; background: var(--line); }
+.chart-meta {
+  padding: 7px 14px; border-top: 1px solid var(--line-soft);
+  font-family: var(--mono); font-size: 10.5px; color: var(--faint); letter-spacing: .4px;
+  display: flex; gap: 16px; flex-wrap: wrap;
+}
+.chart-meta b { color: var(--muted); font-weight: 600; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+/* 双栏 */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.grid-2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
+.heat-wrap { display: flex; flex-direction: column; gap: 8px; max-width: 100%; }
+.heat-chunk { display: flex; flex-direction: column; gap: 2px; }
+.heat-chunk-label { font-family: var(--mono); font-size: 10px; color: var(--faint); letter-spacing: .5px; margin-bottom: 2px; }
+.heat-chunk-body { display: flex; }
+#sleep-cards, #hr-cards { grid-template-columns: repeat(3, 1fr); }
+.heat-grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); gap: 3px; padding: 4px; }
+.heat-row-label { display: flex; flex-direction: column; gap: 3px; margin-right: 6px; }
+.heat-row-label span { font-family: var(--mono); font-size: 9px; color: var(--faint); height: 100%; display: flex; align-items: center; }
+.heat-cell { aspect-ratio: 1.4; border-radius: 2px; background: var(--panel-2); position: relative; min-height: 13px; }
+.heat-cell:hover { outline: 1px solid var(--amber); }
+.heat-meta { font-family: var(--mono); font-size: 10.5px; color: var(--faint); display: flex; justify-content: space-between; padding: 7px 14px; border-top: 1px solid var(--line-soft); }
+
+/* 堆叠占比条 */
+.stack-bar { display: flex; height: 14px; border-radius: 3px; overflow: hidden; margin: 6px 0 4px; }
+.stack-bar span { display: block; height: 100%; }
+.stack-legend { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.stack-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+/* 睡眠质量评分 */
+.score-row { display: flex; gap: 28px; align-items: center; flex-wrap: wrap; }
+.score-big { text-align: center; min-width: 150px; padding: 6px 18px; border-right: 1px solid var(--line-soft); }
+.score-num { font-family: var(--mono); font-size: 64px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.score-grade { font-family: var(--mono); font-size: 15px; letter-spacing: 3px; margin-top: 4px; }
+.score-desc { font-size: 11.5px; color: var(--muted); margin-top: 2px; font-family: var(--mono); }
+.score-dims { flex: 1; min-width: 300px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 22px; }
+.score-dim-head { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.score-dim-head b { font-size: 14px; }
+.score-dim-val { color: var(--faint); font-size: 11px; }
+.score-dim-bar { height: 5px; background: var(--panel-2); border-radius: 3px; margin: 5px 0 3px; overflow: hidden; }
+.score-dim-bar span { display: block; height: 100%; border-radius: 3px; }
+.score-dim-desc { font-size: 11px; color: var(--faint); }
+.score-note { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 11.5px; color: var(--faint); }
+
+/* ---- 表格 ---- */
+table.rich-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.rich-table th {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--faint); text-align: left; font-weight: 500;
+  padding: 8px 12px; border-bottom: 1px solid var(--line-soft);
+}
+.rich-table td { padding: 8px 12px; border-bottom: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
+.rich-table tbody tr { cursor: pointer; transition: background .1s; }
+.rich-table tbody tr:hover { background: var(--panel-2); }
+.rich-table td.num { font-family: var(--mono); color: var(--text); }
+.rich-table td.mut { color: var(--muted); }
+
+/* ---- 质量 ---- */
+.qual-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.qual-item { border: 1px solid var(--line-soft); border-radius: 4px; padding: 8px 12px; background: var(--panel-2); }
+.qual-item .k { font-family: var(--mono); font-size: 10px; letter-spacing: 1.2px; color: var(--faint); text-transform: uppercase; }
+.qual-item .v { font-family: var(--mono); font-size: 17px; color: var(--text); font-variant-numeric: tabular-nums; margin-top: 2px; }
+.qual-item.warn .v { color: var(--red); }
+.qual-item.ok .v { color: var(--cyan); }
+.qual-note { margin-top: 10px; font-size: 12px; color: var(--muted); }
+.qual-note b { color: var(--amber); }
+
+/* ---- 错误条 ---- */
+#error-bar {
+  max-width: 680px; margin: 24px auto; padding: 12px 16px;
+  border: 1px solid rgba(229,101,90,.5); border-radius: 6px;
+  background: rgba(229,101,90,.07);
+  color: #F0A49C; font-size: 13px;
+}
+#error-bar::before { content: "⚠ 导入失败："; font-family: var(--mono); font-weight: 700; }
+
+footer {
+  margin-top: 22px; padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+  font-family: var(--mono); font-size: 10.5px; color: var(--faint); letter-spacing: .8px;
+  display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+}
+
+@media (max-width: 960px) {
+  .cards { grid-template-columns: repeat(2, 1fr); }
+  #sleep-cards, #hr-cards { grid-template-columns: repeat(2, 1fr); }
+  .grid-2, .grid-2-1 { grid-template-columns: 1fr; }
+}
+@media (max-width: 620px) {
+  .cards, #sleep-cards, #hr-cards { grid-template-columns: 1fr; }
+  #main-chart { height: 300px; }
+  .card-value { font-size: 30px; }
+  .mnav { padding: 8px 10px; font-size: 11.5px; }
+}
+</style>
+</head>
+<body>
+<div class="bg-decor"></div>
+
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">VITALS//ARK</span>
+      <span class="brand-sub">Apple Health 本地数据终端</span>
+    </div>
+    <div class="top-right">
+      <span class="privacy-badge">100% LOCAL · 数据不出本机</span>
+      <button class="btn" id="btn-file" type="button">导入 export.xml</button>
+      <input type="file" id="file-input" accept=".xml,text/xml,application/xml" hidden>
+    </div>
+  </header>
+
+  <section id="landing">
+    <div class="hero">
+      <h1>VITALS<em>//</em>ARK</h1>
+      <p class="hero-sub">Apple Health 数据本地可视化 · 深色数据终端</p>
+      <div class="drop-zone" id="drop-zone" role="button" tabindex="0" aria-label="导入 Apple Health 导出的 export.xml 文件">
+        <div class="dz-icon"></div>
+        <div class="dz-text">拖拽 <b>export.xml</b> 到这里，或 <span class="dz-link">点击选择文件</span></div>
+        <div class="dz-hint">文件仅在本地浏览器内解析 · 不上传 · 不联网 · 关闭即清空</div>
+      </div>
+      <div class="howto">
+        <div class="howto-title">使用步骤</div>
+        <ol>
+          <li>iPhone「健康」App → 右上角头像 → <b>导出所有健康数据</b> → 存储到「文件」</li>
+          <li>把 export.zip 传到电脑并解压，得到 <b>export.xml</b></li>
+          <li>把 export.xml 拖入上方区域，看板即刻生成</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="dash" hidden>
+    <div id="progress-wrap" hidden>
+      <div class="prog-label"><span id="prog-text">正在解析…</span><span id="prog-pct">0%</span></div>
+      <div class="prog-track"><div class="prog-fill" id="prog-fill"></div></div>
+    </div>
+
+    <nav class="module-nav" id="module-nav" aria-label="模块导航">
+      <button class="mnav active" data-module="overview">概览<span class="badge" id="badge-overview">–</span></button>
+      <button class="mnav" data-module="sleep">睡眠<span class="badge" id="badge-sleep">–</span></button>
+      <button class="mnav" data-module="heart">心率<span class="badge" id="badge-heart">–</span></button>
+      <button class="mnav" data-module="others">其他指标<span class="badge" id="badge-others">–</span></button>
+    </nav>
+
+    <!-- ============ 概览模块 ============ -->
+    <section id="module-overview">
+      <div id="summary-strip" hidden></div>
+      <div class="cards" id="today-cards"></div>
+      <div class="panel">
+        <div class="panel-head">
+          <div class="tabs" id="metric-tabs"></div>
+          <div class="tabs range-tabs" id="range-tabs">
+            <button class="tab" data-range="7d">7D</button>
+            <button class="tab active" data-range="30d">30D</button>
+            <button class="tab" data-range="90d">90D</button>
+            <button class="tab" data-range="180d">180D</button>
+            <button class="tab" data-range="1y">1Y</button>
+            <button class="tab" data-range="all">ALL</button>
+          </div>
+        </div>
+        <div class="chart-wrap" id="main-wrap">
+          <canvas id="main-chart" role="img" aria-label="主趋势图"></canvas>
+          <div class="chart-tip" id="chart-tip" hidden></div>
+        </div>
+        <div class="chart-meta" id="chart-meta"></div>
+      </div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title cyan">心率分布</span><span class="panel-title" style="color:var(--faint)">DISTRIBUTION</span></div>
+          <div class="chart-wrap">
+            <canvas class="mini-chart" id="dist-chart" role="img" aria-label="心率分布直方图"></canvas>
+            <div class="chart-tip" id="dist-tip" hidden></div>
+          </div>
+          <div class="chart-meta"><span><b>口径：</b>时间范围内全部心率采样分桶</span></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title violet">周规律热力</span><span class="panel-title" style="color:var(--faint)">WEEKLY · 步数</span></div>
+          <div class="panel-body"><div class="heat-wrap" id="heat-wrap"></div></div>
+          <div class="heat-meta"><span id="heat-range-label"></span><span>颜色越亮 = 步数越多</span></div>
+        </div>
+      </div>
+      <div class="panel" id="other-panel" hidden>
+        <div class="panel-head"><span class="panel-title">其他指标</span><span class="panel-title" style="color:var(--faint)">OTHER METRICS</span></div>
+        <div class="panel-body no-pad"><table class="rich-table" id="other-table"></table></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">数据质量</span><span class="panel-title" style="color:var(--faint)">DATA INTEGRITY</span></div>
+        <div class="panel-body">
+          <div class="qual-grid" id="qual-grid"></div>
+          <div class="qual-note" id="qual-note"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 睡眠模块 ============ -->
+    <section id="module-sleep" hidden>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title violet">睡眠分析</span>
+          <div class="gran-bar">
+            <div class="tabs" id="sleep-mode-tabs" style="margin-right:6px">
+              <button class="tab active" data-mode="all">全部</button>
+              <button class="tab" data-mode="night">晚间</button>
+              <button class="tab" data-mode="nap">午睡</button>
+            </div>
+            <div class="tabs" id="sleep-gran-tabs">
+              <button class="tab active" data-gran="day">日</button>
+              <button class="tab" data-gran="week">周</button>
+              <button class="tab" data-gran="month">月</button>
+            </div>
+            <div class="gran-cursor">
+              <button class="nav-btn" id="sleep-prev" aria-label="上一个">◀</button>
+              <span class="cur-label" id="sleep-cur-label">—</span>
+              <button class="nav-btn" id="sleep-next" aria-label="下一个">▶</button>
+            </div>
+          </div>
+        </div>
+        <div class="cards" id="sleep-cards"></div>
+        <div class="chart-wrap" id="sleep-main-wrap">
+          <canvas id="sleep-chart" role="img" aria-label="睡眠图表" style="height:340px"></canvas>
+          <div class="chart-tip" id="sleep-tip" hidden></div>
+        </div>
+        <div class="chart-meta" id="sleep-chart-meta"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title violet">睡眠质量评分</span><span class="panel-title" style="color:var(--faint)">SLEEP QUALITY SCORE · 参考 Apple 睡眠评分（7.5h 理想 / 6h 及格）</span></div>
+        <div class="panel-body" id="sleep-score-body"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title violet">睡眠质量历史</span><span class="panel-title" style="color:var(--faint)">近 90 天逐日评分 · 记录与改进</span></div>
+        <div class="chart-wrap">
+          <canvas class="mini-chart" id="sleep-history-chart" style="height:220px" role="img" aria-label="睡眠质量历史评分"></canvas>
+          <div class="chart-tip" id="sleep-history-tip" hidden></div>
+        </div>
+        <div class="chart-meta" id="sleep-history-meta"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title violet">阶段构成</span><span class="panel-title" style="color:var(--faint)">STAGES</span></div>
+        <div class="panel-body" id="sleep-stages"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">睡眠时长趋势</span><span class="panel-title" style="color:var(--faint)">近 12 周周均 · 虚线为理想目标</span></div>
+        <div class="chart-wrap">
+          <canvas class="mini-chart" id="sleep-trend-chart" style="height:200px" role="img" aria-label="睡眠时长趋势"></canvas>
+          <div class="chart-tip" id="sleep-trend-tip" hidden></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">入睡 / 醒来时间</span><span class="panel-title" style="color:var(--faint)">近 30 天</span></div>
+        <div class="chart-wrap">
+          <canvas class="mini-chart" id="sleep-timing-chart" style="height:200px" role="img" aria-label="入睡醒来时间趋势"></canvas>
+          <div class="chart-tip" id="sleep-timing-tip" hidden></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title violet">睡眠周规律</span><span class="panel-title" style="color:var(--faint)">WEEKLY · 时长</span></div>
+        <div class="panel-body"><div class="heat-wrap" id="sleep-heat-wrap"></div></div>
+        <div class="heat-meta"><span id="sleep-heat-label"></span><span>颜色越亮 = 睡眠越长</span></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title violet">睡眠 × HRV 关联</span><span class="panel-title" style="color:var(--faint)">近 30 天 · 观察恢复关联性</span></div>
+        <div class="chart-wrap">
+          <canvas class="mini-chart" id="sleep-hrv-chart" style="height:400px" role="img" aria-label="睡眠与心率变异性关联图"></canvas>
+          <div class="chart-tip" id="sleep-hrv-tip" hidden></div>
+        </div>
+        <div class="chart-meta"><span><b>双轴叠加：</b>柱 = 睡眠时长（左轴 h）· 线 = 睡眠期 HRV（右轴 ms，入睡→醒来区间）</span><span>悬停查看两指标</span></div>
+      </div>
+      <div class="panel" id="sleep-extra-panel" hidden>
+        <div class="panel-head"><span class="panel-title">深度附加</span><span class="panel-title" style="color:var(--faint)">腕温 / 目标</span></div>
+        <div class="panel-body" id="sleep-extra-body"></div>
+      </div>
+    </section>
+
+    <!-- ============ 心率模块 ============ -->
+    <section id="module-heart" hidden>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title cyan">心率分析</span>
+          <div class="gran-bar">
+            <div class="tabs" id="hr-gran-tabs">
+              <button class="tab active" data-gran="day">日</button>
+              <button class="tab" data-gran="week">周</button>
+              <button class="tab" data-gran="month">月</button>
+            </div>
+            <div class="gran-cursor">
+              <button class="nav-btn" id="hr-prev" aria-label="上一个">◀</button>
+              <span class="cur-label" id="hr-cur-label">—</span>
+              <button class="nav-btn" id="hr-next" aria-label="下一个">▶</button>
+            </div>
+          </div>
+        </div>
+        <div class="cards" id="hr-cards"></div>
+        <div class="chart-wrap" id="hr-main-wrap">
+          <canvas id="hr-chart" role="img" aria-label="心率图表" style="height:320px"></canvas>
+          <div class="chart-tip" id="hr-tip" hidden></div>
+        </div>
+        <div class="chart-meta" id="hr-chart-meta"></div>
+      </div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title cyan">心率分布</span><span class="panel-title" style="color:var(--faint)">窗口内采样</span></div>
+          <div class="chart-wrap">
+            <canvas class="mini-chart" id="hr-dist-chart" role="img" aria-label="心率分布"></canvas>
+            <div class="chart-tip" id="hr-dist-tip" hidden></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title">强度分区</span><span class="panel-title" style="color:var(--faint)">ZONES</span></div>
+          <div class="panel-body" id="hr-zones"></div>
+        </div>
+      </div>
+      <div class="panel" id="hr-extra-panel" hidden>
+        <div class="panel-head"><span class="panel-title cyan">深度附加</span><span class="panel-title" style="color:var(--faint)">HRV / 静息对比</span></div>
+        <div class="panel-body" id="hr-extra-body"></div>
+      </div>
+    </section>
+
+    <!-- ============ 其他指标模块（通用指标分析） ============ -->
+    <section id="module-others" hidden>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-title">指标分析</span>
+          <div class="gran-bar">
+            <select class="other-select" id="metric-mod-select" aria-label="选择指标" style="min-width:180px"></select>
+            <div class="tabs" id="metric-mod-gran">
+              <button class="tab active" data-gran="day">日</button>
+              <button class="tab" data-gran="week">周</button>
+              <button class="tab" data-gran="month">月</button>
+            </div>
+            <div class="gran-cursor">
+              <button class="nav-btn" id="metric-mod-prev" aria-label="上一个">◀</button>
+              <span class="cur-label" id="metric-mod-label">—</span>
+              <button class="nav-btn" id="metric-mod-next" aria-label="下一个">▶</button>
+            </div>
+          </div>
+        </div>
+        <div class="cards" id="metric-mod-cards"></div>
+        <div class="chart-wrap" id="metric-mod-wrap">
+          <canvas id="metric-mod-chart" role="img" aria-label="指标趋势图" style="height:320px"></canvas>
+          <div class="chart-tip" id="metric-mod-tip" hidden></div>
+        </div>
+        <div class="chart-meta" id="metric-mod-meta"></div>
+      </div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title">周规律热力</span><span class="panel-title" style="color:var(--faint)">WEEKLY · 当前指标</span></div>
+          <div class="panel-body"><div class="heat-wrap" id="metric-mod-heat"></div></div>
+          <div class="heat-meta"><span id="metric-mod-heat-label"></span><span>颜色越亮 = 数值越高</span></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title">统计摘要</span><span class="panel-title" style="color:var(--faint)">近 12 周</span></div>
+          <div class="panel-body" id="metric-mod-stats"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">指标清单</span><span class="panel-title" style="color:var(--faint)">点击行查看分析</span></div>
+        <div class="panel-body no-pad"><table class="rich-table" id="others-table"></table></div>
+      </div>
+    </section>
+
+    <footer>
+      <span>VITALS//ARK v2.0 · 解析引擎 v1.0</span>
+      <span id="footer-local">纯本地运行 · 健康数据不出本机 · 原始 export.xml 只读不修改</span>
+    </footer>
+  </section>
+</div>
+
+<script src="engine.js"></script>
+<script>
+/* 诊断钩子：把运行期错误写入标题（供 headless 验证与用户调试） */
+window.addEventListener('error', function (e) {
+  try { document.title = 'ERR: ' + (e.message || e.error); } catch (_) {}
+});
+window.addEventListener('unhandledrejection', function (e) {
+  try { document.title = 'ERR: ' + ((e.reason && e.reason.message) || e.reason || 'promise'); } catch (_) {}
+});
+</script>
+<script src="app.js"></script>
+</body>
+</html>
