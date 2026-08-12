@@ -1252,10 +1252,12 @@
     return monthKeyAdd(cur.slice(0, 7) + '-01', 1);
   }
   function aggSleepDays(days) {
-    var a = { asleep: 0, deep: 0, rem: 0, core: 0, awake: 0, inBed: 0, n: 0, fallSum: 0, wakeSum: 0, tN: 0 };
+    var a = { asleep: 0, deep: 0, rem: 0, core: 0, awake: 0, inBed: 0, n: 0, inBedN: 0, fallSum: 0, wakeSum: 0, tN: 0 };
     days.forEach(function (d) {
-      a.asleep += d.v; a.deep += d.deep; a.rem += d.rem; a.core += d.core; a.awake += d.awake; a.inBed += d.inBed;
-      if (d.v > 0 || d.inBed > 0) a.n++;
+      a.asleep += d.v; a.deep += d.deep; a.rem += d.rem; a.core += d.core; a.awake += d.awake;
+      if (d.v > 0) a.n++;
+      /* 在床记录单独计数：卧床日均只除以有在床记录的天，避免被缺失天稀释 */
+      if (d.inBed > 0) { a.inBed += d.inBed; a.inBedN++; }
       /* 入睡时间环形平均：>=12:00 的按前半夜（-1440）归一，避免 23:xx 与 00:xx 平均失真 */
       if (d.fallAsleepTs) {
         var fm = localMinOf(d.fallAsleepTs);
@@ -1356,7 +1358,7 @@
     }
     if (hasData) {
       var curAsleep = isDay ? (inWin[0] ? inWin[0].v : 0) : (agg.n ? agg.asleep / agg.n : 0);
-      var curInBed = isDay ? (inWin[0] ? inWin[0].inBed || 0 : 0) : (agg.n ? agg.inBed / agg.n : 0);
+      var curInBed = isDay ? (inWin[0] ? inWin[0].inBed || 0 : 0) : (agg.inBedN ? agg.inBed / agg.inBedN : 0);
       var prevAsleep = prevAgg ? (isDay ? (prevAgg.n ? prevAgg.asleep : null) : (prevAgg.n ? prevAgg.asleep / prevAgg.n : 0)) : null;
       var statusHtml2 = (function () {
         var st = statusOf(curAsleep);
@@ -1733,7 +1735,7 @@
     var prevN = prev && prev.n ? prev.n : 0;
     var divN = isDay ? 1 : (agg.n || 1);
     function stageCard(name, min, color, extraNote) {
-      var shown = min / divN;
+      var shown = min / (name === '在床' ? (agg.inBedN || 1) : divN);
       var pct = total ? Math.round(shown / (total / divN) * 100) : 0;
       var vs = '';
       if (prevN && prev[name] != null) {
