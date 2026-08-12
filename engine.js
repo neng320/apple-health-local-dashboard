@@ -21,7 +21,7 @@
   var KNOWN = {
     'HKQuantityTypeIdentifierStepCount': { key: 'steps', kind: 'sum', unit: '步', label: '步数' },
     'HKQuantityTypeIdentifierActiveEnergyBurned': { key: 'energy', kind: 'sum', unit: 'kcal', label: '活动能量' },
-    'HKQuantityTypeIdentifierDistanceWalkingRunning': { key: 'distance', kind: 'sum', unit: 'km', label: '步行+跑步距离' },
+    'HKQuantityTypeIdentifierDistanceWalkingRunning': { key: 'distance', kind: 'sum', unit: 'km', label: '步行+跑步距离', round: 100 },
     'HKQuantityTypeIdentifierHeartRate': { key: 'heartRate', kind: 'range', unit: 'bpm', label: '心率' },
     'HKQuantityTypeIdentifierRestingHeartRate': { key: 'restingHR', kind: 'avg', unit: 'bpm', label: '静息心率' },
     'HKQuantityTypeIdentifierWalkingHeartRateAverage': { key: 'walkingHR', kind: 'avg', unit: 'bpm', label: '步行平均心率' },
@@ -34,7 +34,7 @@
     'HKQuantityTypeIdentifierAppleStandTime': { key: 'standTime', kind: 'sum', unit: 'min', label: '站立时间' },
     'HKQuantityTypeIdentifierAppleExerciseTime': { key: 'exerciseTime', kind: 'sum', unit: 'min', label: '锻炼时间' },
     'HKQuantityTypeIdentifierFlightsClimbed': { key: 'flights', kind: 'sum', unit: '层', label: '爬楼层数' },
-    'HKQuantityTypeIdentifierDistanceCycling': { key: 'cycling', kind: 'sum', unit: 'km', label: '骑行距离' },
+    'HKQuantityTypeIdentifierDistanceCycling': { key: 'cycling', kind: 'sum', unit: 'km', label: '骑行距离', round: 100 },
     'HKQuantityTypeIdentifierHeight': { key: 'height', kind: 'last', unit: 'cm', label: '身高' },
     'HKDataTypeSleepDurationGoal': { key: 'sleepGoal', kind: 'last', unit: 'hr', label: '睡眠目标' },
     'HKQuantityTypeIdentifierWalkingSpeed': { key: 'walkingSpeed', kind: 'avg', unit: 'km/hr', label: '步行速度' },
@@ -170,7 +170,8 @@
     var slot = m.get(dk);
     if (!slot) {
       slot = { sum: 0, n: 0, min: Infinity, max: -Infinity, last: 0, lastTs: -1,
-               sleep: {}, sleepFirst: Infinity, sleepLast: -Infinity, hasLegacyAsleep: false, hasNight: false };
+               sleep: {}, sleepFirst: Infinity, sleepLast: -Infinity, hasLegacyAsleep: false, hasNight: false,
+               coarseSegs: [], subSegs: [] };
       m.set(dk, slot);
     }
     return slot;
@@ -246,7 +247,8 @@
       /* 总睡眠 slot（入睡/醒来时间只用晚间段，避免午睡污染） */
       var slot = daySlot(acc, 'sleep', dk);
       slot.sleep[stage] = (slot.sleep[stage] || 0) + durMin;
-      if (stage === 'asleep') slot.hasLegacyAsleep = true;
+      if (stage === 'asleep') { slot.hasLegacyAsleep = true; slot.coarseSegs.push({ s: d.ts, e: e.ts, dur: durMin }); }
+      else if (stage !== 'inBed' && stage !== 'awake') slot.subSegs.push({ s: d.ts, e: e.ts, dur: durMin });
       if (isNight) slot.hasNight = true; /* 该天是否有晚间睡眠段（无晚间段视为设备未记录，全部口径跳过） */
       if (stage !== 'inBed' && stage !== 'awake' && isNight) {
         slot.sleepFirst = Math.min(slot.sleepFirst, d.ts);
@@ -256,7 +258,8 @@
       var subKey = isNight ? 'sleepNight' : 'sleepNap';
       var subSlot = daySlot(acc, subKey, dk);
       subSlot.sleep[stage] = (subSlot.sleep[stage] || 0) + durMin;
-      if (stage === 'asleep') subSlot.hasLegacyAsleep = true;
+      if (stage === 'asleep') { subSlot.hasLegacyAsleep = true; subSlot.coarseSegs.push({ s: d.ts, e: e.ts, dur: durMin }); }
+      else if (stage !== 'inBed' && stage !== 'awake') subSlot.subSegs.push({ s: d.ts, e: e.ts, dur: durMin });
       if (stage !== 'inBed' && stage !== 'awake') {
         subSlot.sleepFirst = Math.min(subSlot.sleepFirst, d.ts);
         subSlot.sleepLast = Math.max(subSlot.sleepLast, e.ts);
@@ -448,6 +451,32 @@
   function finalize(acc, opts) {
     opts = opts || {};
     var daily = {};
+
+    /* 当日睡眠时长（分钟）：细分阶段和 + 与细分时段不重叠的粗粒度段。
+     * 夜间通常导出细分阶段（Core/Deep/REM），午睡常为粗粒度 Asleep/Unspecified——
+     * 直接取 max/二选一都会丢午睡（「全部」口径与晚间+午睡拆分对不上）。
+     * 若粗粒度段与细分跨度重叠（旧 iOS 双导出同源记录），只计细分，避免重复累计。 */
+    function sleepAsleep(slot) {
+      var s = slot.sleep;
+      var sub = (s.core || 0) + (s.deep || 0) + (s.rem || 0);
+      if (!slot.coarseSegs || !slot.coarseSegs.length) return sub;        /* 纯细分 */
+      if (!sub || !slot.subSegs || !slot.subSegs.length) return s.asleep || 0; /* 纯粗粒度 */
+      var extra = 0;
+      for (var ci = 0; ci < slot.coarseSegs.length; ci++) {
+        var cs = slot.coarseSegs[ci];
+        /* 与细分段实际交集 ≥ 段长 50% → Apple 双导出同源（覆盖同一时段），跳过；
+           否则（午睡等额外段）计入。按段逐一求交，避免「夜间包络跨整天」误杀午睡 */
+        var ov = 0;
+        for (var si = 0; si < slot.subSegs.length; si++) {
+          var ss = slot.subSegs[si];
+          var o = Math.min(cs.e, ss.e) - Math.max(cs.s, ss.s);
+          if (o > 0) ov += o;
+        }
+        if (ov >= cs.dur * 0.5) continue;
+        extra += cs.dur;
+      }
+      return sub + extra;
+    }
     Object.keys(acc.daily).forEach(function (key) {
       var map = acc.daily[key];
       var isSleepKind = key === 'sleep' || key === 'sleepNight' || key === 'sleepNap';
@@ -460,7 +489,9 @@
         var item = { d: dk, ts: dkToTs(dk) };
         switch (kind) {
           case 'sum':
-            item.v = Math.round(slot.sum); item.n = slot.n; break;
+            /* 默认整数；带 round 的指标（距离 km）保留精度 */
+            item.v = meta.round ? Math.round(slot.sum * meta.round) / meta.round : Math.round(slot.sum);
+            item.n = slot.n; break;
           case 'avg':
             item.v = slot.n ? Math.round(slot.sum / slot.n * 10) / 10 : null;
             item.n = slot.n;
@@ -484,10 +515,7 @@
               item.nightMissing = 1;
               break;
             }
-            /* Apple 可能同时导出细分阶段（Core/Deep/REM）与粗粒度 Asleep/Unspecified，
-               二者覆盖同一时段（重叠）。细分存在时优先用细分和，否则用粗粒度。 */
-            var hasSub = (s.core || 0) + (s.deep || 0) + (s.rem || 0) > 0;
-            var asleep = hasSub ? (s.core || 0) + (s.deep || 0) + (s.rem || 0) : (s.asleep || 0);
+            var asleep = sleepAsleep(slot);
             item.v = Math.round(asleep);
             /* 在床时长上限保护：单日累计 > 16h 视为异常叠加（如多段重叠记录），截断至 16h */
             item.inBed = Math.min(Math.round(s.inBed || 0), 16 * 60);
@@ -543,30 +571,35 @@
     var skippedTotal = 0;
     for (var k in acc.skipped) if (k !== 'unknownType' && k !== 'unknownUnit') skippedTotal += acc.skipped[k];
 
-    /* 睡眠期 HRV：只统计落入每晚「入睡→醒来」区间内的 HRV 记录（跨日由绝对时间戳自然处理） */
+    /* 睡眠期 HRV：只统计落入每晚「入睡→醒来」区间内的 HRV 记录。
+     * 归属按「睡眠段所在日」而非采样所在日：跨午夜夜晚的凌晨采样（醒来日
+     * 自己也有晚间段）此前会被窗口校验误丢，现统一归入睡日。 */
     if (acc.hrvRawTs.length && daily.sleep) {
       var sleepByDay = {};
       daily.sleep.days.forEach(function (d) { sleepByDay[d.d] = d; });
+      function hrvDayKey(dk, days) { return dayKeyOf(dkToTs(dk) + days * 86400000, 0); }
+      function hrvInWindow(seg, hts) {
+        return seg && seg.fallAsleepTs && seg.wakeTs && hts >= seg.fallAsleepTs && hts <= seg.wakeTs;
+      }
       var hrvSum = {}, hrvN = {}, hrvFirst = {}, hrvLast = {};
       for (var hi = 0; hi < acc.hrvRawTs.length; hi++) {
         var hts = acc.hrvRawTs[hi];
         var hd = new Date(hts);
         var hdk = hd.getFullYear() + '-' + pad2(hd.getMonth() + 1) + '-' + pad2(hd.getDate());
+        /* 先匹配采样所在日（当地时）的晚间段；不在其窗口内则尝试前一天（跨午夜夜晚） */
         var seg = sleepByDay[hdk];
-        /* 若当天无睡眠段，尝试前一天（入睡在前一晚的情况） */
-        if (!seg) {
-          var p = hdk.split('-');
-          var pt = Date.UTC(+p[0], +p[1] - 1, +p[2]) - 86400000;
-          var pd = new Date(pt);
-          var pdk = pd.getFullYear() + '-' + pad2(pd.getMonth() + 1) + '-' + pad2(pd.getDate());
-          seg = sleepByDay[pdk];
+        var segDay = hdk;
+        if (!hrvInWindow(seg, hts)) {
+          var pdk = hrvDayKey(hdk, -1);
+          var pseg = sleepByDay[pdk];
+          if (hrvInWindow(pseg, hts)) { seg = pseg; segDay = pdk; }
         }
-        if (seg && seg.fallAsleepTs && seg.wakeTs && hts >= seg.fallAsleepTs && hts <= seg.wakeTs) {
-          if (!hrvSum[hdk]) { hrvSum[hdk] = 0; hrvN[hdk] = 0; hrvFirst[hdk] = hts; hrvLast[hdk] = hts; }
-          hrvSum[hdk] += acc.hrvRawV[hi];
-          hrvN[hdk]++;
-          hrvFirst[hdk] = Math.min(hrvFirst[hdk], hts);
-          hrvLast[hdk] = Math.max(hrvLast[hdk], hts);
+        if (hrvInWindow(seg, hts)) {
+          if (!hrvSum[segDay]) { hrvSum[segDay] = 0; hrvN[segDay] = 0; hrvFirst[segDay] = hts; hrvLast[segDay] = hts; }
+          hrvSum[segDay] += acc.hrvRawV[hi];
+          hrvN[segDay]++;
+          hrvFirst[segDay] = Math.min(hrvFirst[segDay], hts);
+          hrvLast[segDay] = Math.max(hrvLast[segDay], hts);
         }
       }
       var hrvSleepDays = [];
