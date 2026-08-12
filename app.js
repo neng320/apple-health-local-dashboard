@@ -24,9 +24,7 @@
     hrCur: null,
     metricMod: { sel: null, gran: 'day', cur: null },
     motionGran: 'day',
-    motionCur: null,
-    othersSel: null,
-    othersRange: '90d'
+    motionCur: null
   };
 
   var METRIC_CONF = {
@@ -35,6 +33,7 @@
     heartRate: { label: '心率', unit: 'bpm', color: '#4FC3B7', kind: 'range' },
     sleep: { label: '睡眠', unit: 'h', color: '#9B8AFB', kind: 'sleep' },
     bodyMass: { label: '体重', unit: 'kg', color: '#E8A33D', kind: 'last' },
+    height: { label: '身高', unit: 'cm', color: '#E8A33D', kind: 'last' },
     distance: { label: '步行+跑步距离', unit: 'km', color: '#F2B45C', kind: 'sum' },
     restingHR: { label: '静息心率', unit: 'bpm', color: '#4FC3B7', kind: 'avg' },
     walkingHR: { label: '步行平均心率', unit: 'bpm', color: '#4FC3B7', kind: 'avg' },
@@ -92,12 +91,6 @@
   }
   function weekEndKey(key) { return dayKeyAdd(weekStartKey(key), 6); }
   function localMinOf(ts) { var d = new Date(ts); return d.getHours() * 60 + d.getMinutes(); }
-  function fmtDelta(delta, suffix) {
-    if (delta == null || !isFinite(delta)) return '';
-    var cls = delta >= 0 ? 'up' : 'down';
-    var arrow = delta >= 0 ? '▲ +' : '▼ ';
-    return '<span class="' + cls + '">' + arrow + Math.abs(Math.round(delta)) + ' ' + suffix + '</span>';
-  }
   /* 睡眠效率（严格按 Apple 口径）：asleep ⊆ inBed，正常范围 0–100%
    * - inBed 缺失 → 无效（—）
    * - asleep > inBed×1.05 → InBed 记录缺失/矛盾 → 数据异常（不参与评分）
@@ -129,10 +122,6 @@
   function sleepStatusHtml(v) {
     var st = statusOf(v);
     return st ? '<span style="color:' + st.color + '">' + (st.label.indexOf('不足') >= 0 || st.label.indexOf('过长') >= 0 ? '⚠ ' : st.label.indexOf('高于') >= 0 ? '⚠ ' : '') + st.label + '</span>' : '';
-  }
-  function pctDelta(cur, prev) {
-    if (!prev) return null;
-    return Math.round((cur - prev) / prev * 100);
   }
 
   /* ---------------- 数据访问 ---------------- */
@@ -520,56 +509,6 @@
     });
   }
 
-  /* 单日睡眠时间轴（21:00 → 次日 12:00） */
-  function drawSleepTimeline(canvas, segs, dayKey) {
-    var c = setupCanvas(canvas, 130);
-    var ctx = c.ctx, W = c.W, H = c.H;
-    var padL = 56, padR = 16, padT = 10, padB = 24;
-    var T0 = 21 * 60, T1 = 36 * 60; // 21:00 → 次日 12:00
-    var plotW = W - padL - padR, plotH = H - padT - padB;
-    var xOf = function (m) { return padL + (m - T0) / (T1 - T0) * plotW; };
-    ctx.clearRect(0, 0, W, H);
-    /* 背景网格（每 1h） */
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-    ctx.fillStyle = '#6B7480';
-    ctx.font = '10px ui-monospace, Consolas, monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    for (var h = 21; h <= 35; h++) {
-      var x = xOf(h * 60);
-      ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, H - padB); ctx.stroke();
-      ctx.fillText(String(h % 24).padStart(2, '0') + ':00', x, H - padB + 5);
-    }
-    ctx.restore();
-    /* 分段 */
-    var stageColor = { inBed: '#3A4048', asleep: '#4FC3B7', core: '#4FC3B7', deep: '#7B6CF6', rem: '#9B8AFB', awake: '#E5655A' };
-    var y = padT + 4, barH = plotH - 14;
-    segs.forEach(function (s) {
-      var start = s.startMin >= T0 ? s.startMin : s.startMin + 1440;
-      var end = start + s.durMin;
-      var x1 = Math.max(xOf(T0), xOf(Math.max(T0, start)));
-      var x2 = Math.min(xOf(T1), xOf(Math.min(T1, end)));
-      if (x2 <= x1) return;
-      ctx.fillStyle = stageColor[s.stage] || '#4FC3B7';
-      ctx.fillRect(x1, y, x2 - x1, barH);
-    });
-    /* 图例 */
-    ctx.save();
-    ctx.font = '10.5px ui-monospace, Consolas, monospace';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    var lx = padL;
-    Object.keys(stageColor).forEach(function (k) {
-      ctx.fillStyle = stageColor[k];
-      ctx.fillRect(lx, y + barH + 9, 9, 9);
-      ctx.fillStyle = '#6B7480';
-      ctx.fillText(k, lx + 13, y + barH + 13);
-      lx += 13 + ctx.measureText(k).width + 16;
-    });
-    ctx.restore();
-  }
-
   /* 双折线（入睡/醒来时间） */
   function drawDualLine(canvas, list, opts) {
     opts = opts || {};
@@ -703,7 +642,7 @@
   }
 
   /* 周热力（通用） */
-  function renderHeatGrid(wrap, days, color, maxVal, tipLabel, tipEl, fmt, colorFn) {
+  function renderHeatGrid(wrap, days, color, maxVal, tipLabel, tipEl, fmt, colorFn, statusFn) {
     if (!days.length) {
       wrap.innerHTML = '<div class="chart-empty" style="position:static;padding:36px 0"><div>数据不足</div><div class="em-line"></div><div>NO DATA</div></div>';
       return;
@@ -746,9 +685,13 @@
     wrap.querySelectorAll('.heat-cell[data-d]').forEach(function (cell) {
       cell.addEventListener('mousemove', function (e) {
         var v = +cell.getAttribute('data-v');
-        var st = sleepStatus(v);
-        tipEl.innerHTML = '<div class="t-date">' + cell.getAttribute('data-d') + '</div><div class="t-row"><span>' + tipLabel + '</span><b>' + (fmt ? fmt(v) : fmtNum(v)) + '</b></div>' +
-          '<div class="t-row"><span>状态</span><b>' + (st ? st.label : '—') + '</b></div>';
+        var html = '<div class="t-date">' + cell.getAttribute('data-d') + '</div><div class="t-row"><span>' + tipLabel + '</span><b>' + (fmt ? fmt(v) : fmtNum(v)) + '</b></div>';
+        /* 状态分级仅睡眠类热力需要（睡眠/午睡分级不同，由调用方传入 statusFn） */
+        if (statusFn) {
+          var st = statusFn(v);
+          html += '<div class="t-row"><span>状态</span><b>' + (st ? st.label : '—') + '</b></div>';
+        }
+        tipEl.innerHTML = html;
         tipEl.hidden = false;
         var rect = wrap.getBoundingClientRect();
         var tRect = tipEl.getBoundingClientRect();
@@ -807,7 +750,6 @@
       state.sleepCur = lastSleepDay();
       state.hrGran = 'day';
       state.hrCur = lastDataDay('heartRate');
-      state.othersSel = null;
       pw.hidden = true;
       renderBadges();
       switchModule('overview');
@@ -1024,7 +966,7 @@
   function renderMetricTabs() {
     var wrap = $('metric-tabs');
     var html = '';
-    var order = ['steps', 'energy', 'heartRate', 'sleep', 'bodyMass', 'distance', 'restingHR', 'vo2max', 'oxygen', 'temperature', 'respiratory'];
+    var order = ['steps', 'energy', 'heartRate', 'sleep', 'bodyMass', 'height', 'distance', 'restingHR', 'vo2max', 'oxygen', 'temperature', 'respiratory'];
     order.forEach(function (m) {
       if (state.res.daily[m] && state.res.daily[m].days.length) {
         html += '<button class="tab' + (state.metric === m ? ' active' : '') + '" data-metric="' + m + '">' + METRIC_CONF[m].label + '</button>';
@@ -1153,6 +1095,11 @@
     return days.filter(function (d) { return d.v > 0; });
   }
   function sleepDataDays() { return sleepAllDays().filter(function (d) { return d.v > 0 || d.inBed > 0; }); }
+  /* 晚间口径天数（评分/历史固定使用：午睡不参与评分） */
+  function sleepNightDays() {
+    var days = state.res.daily.sleepNight ? state.res.daily.sleepNight.days : [];
+    return days.filter(function (d) { return d.v > 0; });
+  }
   function setSleepMode(m) {
     state.sleepMode = m;
     state.sleepCur = lastSleepDay();
@@ -1264,15 +1211,12 @@
         a.fallSum += (fm >= 720 ? fm - 1440 : fm);
         a.tN++;
       }
-      if (d.wakeTs) a.wakeSum += localMinOf(d.wakeTs);
+      if (d.wakeTs) {
+        var wm = localMinOf(d.wakeTs);
+        a.wakeSum += (wm >= 720 ? wm - 1440 : wm); /* 与入睡一致：≥12:00 视为前半夜归一 */
+      }
     });
     return a;
-  }
-  function avgFall(a) {
-    if (!a.tN) return null;
-    var sum = a.fallSum;
-    var vals = [];
-    return null;
   }
   function renderSleep() {
     var all = sleepAllDays();
@@ -1297,7 +1241,7 @@
       $('sleep-next').disabled = !nextSleepWindow();
       $('sleep-chart-meta').innerHTML =
         '<span><b>口径：</b>' + modeLabel + '</span>' +
-        '<span><b>粒度：</b>' + (isDay ? '单日详情（上方时间轴 + 近 30 天趋势）' : state.sleepGran === 'week' ? '本周 7 天 vs 上周（浅色）' : '本月每日 vs 上月（浅色）') + '</span>' +
+        '<span><b>粒度：</b>' + (isDay ? '单日详情（上方时间轴 + 近 30 天趋势）' : state.sleepGran === 'week' ? '本周 7 天 vs 上周（浅色）' : state.sleepGran === 'month' ? '本月每日 vs 上月（浅色）' : state.sleepGran === 'quarter' ? '本季每日 vs 上季（浅色）' : state.sleepGran === 'half' ? '本半年每日 vs 上半年（浅色）' : '本年每日 vs 上年（浅色）') + '</span>' +
         '<span><b>柱色：</b><span class="legend"><span><i style="background:#4FC3B7"></i>浅睡</span><span><i style="background:#7B6CF6"></i>深睡</span><span><i style="background:#9B8AFB"></i>REM</span><span><i style="background:#E5655A"></i>清醒</span></span></span>';
     });
     step('cards', function () { renderSleepCards(agg, inWin, prevAgg, isDay, prevCur); });
@@ -1329,7 +1273,7 @@
     }
     /* 入睡/醒来时间（日=具体时间，周/月/季/半年/年=窗口平均；无数据跳过） */
     var fallMin = isDay ? (inWin[0] && inWin[0].fallAsleepTs ? localMinOf(inWin[0].fallAsleepTs) : null) : avgCircular(agg, 'fall');
-    var wakeMin = isDay ? (inWin[0] && inWin[0].wakeTs ? localMinOf(inWin[0].wakeTs) : null) : (agg.tN ? agg.wakeSum / agg.tN : null);
+    var wakeMin = isDay ? (inWin[0] && inWin[0].wakeTs ? localMinOf(inWin[0].wakeTs) : null) : avgCircular(agg, 'wake');
     var twHtml = (fallMin != null ? '入睡 ' + fmtTime(fallMin) : '') + (fallMin != null && wakeMin != null ? ' · ' : '') + (wakeMin != null ? '醒 ' + fmtTime(wakeMin) : '');
     function vsPrev(curVal, prevVal, suffix, betterLower) {
       if (prevVal == null || !curVal) return '';
@@ -1437,6 +1381,12 @@
     if (state.sleepMode === 'nap') {
       el.innerHTML = '<div class="qual-note">午睡不参与睡眠质量评分。评分仅针对晚间睡眠（18:00–次日 10:30 开始的主睡眠段），午睡请关注时长合理性（0.5–1h 正常，&gt;1.5h 异常）。</div>';
       return;
+    }
+    if (state.sleepMode === 'all') {
+      /* 午睡不参与评分：全部口径下也固定用晚间段数据（readme「评分仅针对晚间睡眠」） */
+      var nWin = windowDays(sleepNightDays(), sleepWindow(state.sleepCur).start, sleepWindow(state.sleepCur).end);
+      agg = aggSleepDays(nWin);
+      day = state.sleepGran === 'day' ? (nWin[0] || null) : null;
     }
     var sc = sleepScoreCalc(agg, day);
     if (!agg.n && !day) {
@@ -1546,7 +1496,8 @@
       $('sleep-history-meta').innerHTML = '<span><b>说明：</b>评分历史仅针对晚间睡眠口径。</span>';
       return;
     }
-    var days = sleepDataDays().slice(-90);
+    /* 评分历史固定用晚间口径（全部口径下也排除午睡） */
+    var days = (state.sleepMode === 'all' ? sleepNightDays() : sleepDataDays()).slice(-90);
     var canvas = $('sleep-history-chart');
     clearEmpty(canvas.parentElement);
     if (days.length < 2) { emptyState(canvas, '睡眠数据不足，无法绘制评分历史'); $('sleep-history-meta').innerHTML = ''; return; }
@@ -1594,11 +1545,8 @@
   }
   function avgCircular(agg, which) {
     if (!agg.tN) return null;
-    if (which === 'fall') {
-      var avg = agg.fallSum / agg.tN; /* 已归一（-1440 偏移） */
-      return avg < 0 ? avg + 1440 : avg;
-    }
-    return agg.wakeSum / agg.tN;
+    var avg = (which === 'fall' ? agg.fallSum : agg.wakeSum) / agg.tN; /* 均已按 ≥12:00 归一（-1440） */
+    return avg < 0 ? avg + 1440 : avg;
   }
   function drawSleepDayView(canvas, day, segs, stackDays) {
     var c = setupCanvas(canvas, 340);
@@ -1814,7 +1762,8 @@
       tipEl: $('sleep-trend-tip'),
       goals: goals,
       tipExtra: function (d) {
-        return '<div class="t-row"><span>状态</span>' + (sleepStatusHtml(d.v) || '<b>—</b>') + '</div>';
+        /* 周均趋势值为小时，分级按分钟口径（×60） */
+        return '<div class="t-row"><span>状态</span>' + (sleepStatusHtml(Math.round(d.v * 60)) || '<b>—</b>') + '</div>';
       }
     });
   }
@@ -1836,7 +1785,7 @@
       if (st.label.indexOf('不足') >= 0 || st.label.indexOf('偏长') >= 0) return 'rgba(245,158,107,1)';
       if (st.label.indexOf('高于') >= 0) return 'rgba(232,163,61,1)';
       return 'rgba(155,138,251,1)';
-    });
+    }, statusOf);
   }
   /* 睡眠 × HRV 关联图：双轴叠加（柱=睡眠 h 左轴，线=睡眠期 HRV ms 右轴），共享时间轴 */
   function drawSleepHrvChart(canvas, sleepList, hrvMap) {
@@ -2132,7 +2081,7 @@
         var a = hourSum[h] / hourN[h];
         if (a > bestAvg) { bestAvg = a; bestH = +h; }
       });
-      if (bestH != null) peakLabel = String(bestH).padStart(2, '0') + ':00–' + String(bestH + 1).padStart(2, '0') + ':00 · ' + Math.round(bestAvg) + ' bpm';
+      if (bestH != null) peakLabel = String(bestH).padStart(2, '0') + ':00–' + String((bestH + 1) % 24).padStart(2, '0') + ':00 · ' + Math.round(bestAvg) + ' bpm';
     }
     var resting = dayMetricAvg(state.hrCur, 'restingHR');
     if (state.hrGran !== 'day') {
@@ -2478,7 +2427,7 @@
   var METRIC_LIB = [];
   function buildMetricLib() {
     METRIC_LIB = [];
-    var core = ['steps', 'energy', 'basalEnergy', 'distance', 'restingHR', 'walkingHR', 'oxygen', 'respiratory', 'hrv', 'bodyMass', 'flights', 'exerciseTime', 'standTime', 'cycling', 'walkingSpeed', 'stepLength', 'doubleSupport', 'wristTemp'];
+    var core = ['steps', 'energy', 'basalEnergy', 'distance', 'restingHR', 'walkingHR', 'oxygen', 'respiratory', 'hrv', 'bodyMass', 'height', 'flights', 'exerciseTime', 'standTime', 'cycling', 'walkingSpeed', 'stepLength', 'doubleSupport', 'wristTemp'];
     var colors = ['#E8A33D', '#F2B45C', '#4FC3B7', '#9B8AFB', '#7B6CF6'];
     var ci = 0;
     core.forEach(function (k) {
