@@ -15,6 +15,10 @@ function check(name, ok, detail) {
   console.log((ok ? '  ✅ ' : '  ❌ ') + name + (detail ? '  — ' + detail : ''));
 }
 
+/* 确定性随机（与 make-sample 同 LCG，保证每次运行抽查一致） */
+let seed = 20260812;
+function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+
 /* ============ 1. 样例解析 ============ */
 console.log('\n[1] 样例数据解析与逐日核对');
 const t0 = Date.now();
@@ -44,14 +48,13 @@ const stepDays = new Map(daily.steps.days.map(d => [d.d, d.v]));
 const hrDays = new Map(daily.heartRate.days.map(d => [d.d, d]));
 const sleepDays = new Map(daily.sleep.days.map(d => [d.d, d]));
 const wtDays = new Map(daily.bodyMass.days.map(d => [d.d, d.v]));
+const distDays = new Map(daily.distance.days.map(d => [d.d, d.v]));
 
 let checked = 0, mismatches = [];
 const sampleKeys = Object.keys(ANSWERS.daily);
-/* 抽样：均匀抽 20 天 + 首尾 + 注入日前后 */
+/* 抽样：均匀抽 20 天 + 首尾 + 注入日前后（确定性种子） */
 const idxs = new Set([0, 1, 2, Math.floor(sampleKeys.length / 2), sampleKeys.length - 1, sampleKeys.length - 2, 100, 200, 300, 400, 500]);
 for (let i = 0; i < 10; i++) idxs.add(Math.floor(rnd() * sampleKeys.length));
-
-function rnd() { return Math.random(); }
 
 for (const idx of idxs) {
   const dk = sampleKeys[idx];
@@ -66,6 +69,9 @@ for (const idx of idxs) {
     if (h.max !== a.hrMax) mismatches.push(dk + ' hrMax ' + h.max + ' vs ' + a.hrMax);
     if (h.v !== Math.round(a.hrSum / a.hrN * 10) / 10) mismatches.push(dk + ' hrAvg ' + h.v + ' vs ' + Math.round(a.hrSum / a.hrN * 10) / 10);
   }
+  /* 距离保留 0.01 km 精度（引擎按 round:100 归一；真值 3 位小数，最大舍入差 0.005） */
+  const ds = distDays.get(dk);
+  if (ds === undefined || Math.abs(ds - a.distance) > 0.006) mismatches.push(dk + ' distance ' + ds + ' vs ' + a.distance);
   checked++;
 }
 check('抽样 ' + checked + ' 天步数/心率逐项一致（0 偏差）', mismatches.length === 0,
@@ -75,7 +81,7 @@ check('抽样 ' + checked + ' 天步数/心率逐项一致（0 偏差）', misma
 let sleepOk = true, sleepChecked = 0, sleepDetail = [];
 const sleepSample = Object.keys(ANSWERS.daily).filter(dk => ANSWERS.daily[dk].sleepAsleep > 0);
 for (let i = 0; i < Math.min(5, sleepSample.length); i++) {
-  const dk = sleepSample[Math.floor(Math.random() * sleepSample.length)];
+  const dk = sleepSample[Math.floor(rnd() * sleepSample.length)];
   const a = ANSWERS.daily[dk];
   const s = sleepDays.get(dk);
   if (!s) { sleepOk = false; sleepDetail.push(dk + ' 无睡眠'); continue; }
@@ -84,6 +90,20 @@ for (let i = 0; i < Math.min(5, sleepSample.length); i++) {
   sleepChecked++;
 }
 check('睡眠抽样 ' + sleepChecked + ' 天核对一致', sleepOk, sleepDetail.join('; '));
+
+/* 口径守恒：全部 = 晚间 + 午睡（防止细分/粗粒度混合时丢午睡回归；样例无午睡则跳过） */
+if (daily.sleepNap && daily.sleepNap.days.length) {
+  const allMap = new Map(daily.sleep.days.map(d => [d.d, d.v]));
+  const nightMap = new Map(daily.sleepNight.days.map(d => [d.d, d.v]));
+  const napMap = new Map(daily.sleepNap.days.map(d => [d.d, d.v]));
+  let conserved = true, badDays = [];
+  allMap.forEach((v, dk) => {
+    if (v !== (nightMap.get(dk) || 0) + (napMap.get(dk) || 0)) { conserved = false; badDays.push(dk); }
+  });
+  check('睡眠口径守恒（全部 = 晚间 + 午睡）', conserved, badDays.length ? badDays.slice(0, 3).join(', ') : '');
+} else {
+  console.log('  SKIP: 样例无午睡段（口径守恒由真实数据探针覆盖）');
+}
 
 /* 体重核对 */
 let wtOk = true, wtChecked = 0;
